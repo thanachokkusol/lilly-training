@@ -1,0 +1,95 @@
+import "fake-indexeddb/auto";
+import { describe, it, expect } from "vitest";
+import JSZip from "jszip";
+import {
+  save,
+  allEntries,
+  trash,
+  restoreEntry,
+  inspectBackup,
+  importBackup,
+  exportBackup,
+  storePhoto,
+  photoBlob,
+} from "./db";
+describe("durable records and backup", () => {
+  it("persists and recovers soft deleted logs", async () => {
+    const e = await save(
+      "body",
+      { date: "2026-11-19", weight: 70, waist: null, fat: null, smm: null },
+      "test-body",
+    );
+    await trash(e.id);
+    expect((await allEntries()).find((x) => x.id === e.id)?.deleted).toBe(true);
+    await restoreEntry(e.id);
+    expect((await allEntries()).find((x) => x.id === e.id)?.deleted).toBe(
+      false,
+    );
+  });
+  it("restores a backup without counting the same source twice", async () => {
+    const zip = new JSZip();
+    zip.file(
+      "backup.json",
+      JSON.stringify({
+        format: "lilly-training",
+        schemaVersion: 1,
+        entries: [
+          {
+            id: "test-import",
+            kind: "body",
+            data: {
+              date: "2026-11-19",
+              weight: 71,
+              waist: null,
+              fat: null,
+              smm: null,
+            },
+            dirty: false,
+            version: 30,
+            updatedAt: "2026-11-19T12:00:00Z",
+          },
+        ],
+      }),
+    );
+    const b = await zip.generateAsync({ type: "uint8array" });
+    const file = b as unknown as Blob;
+    expect((await importBackup(file)).added).toBe(1);
+    expect((await importBackup(file)).skipped).toBe(1);
+    const e = (await allEntries()).find((e) => e.id === "test-import");
+    expect(e?.dirty).toBe(true);
+    expect(e?.version).toBe(0);
+  });
+  it("rejects unrelated ZIPs and invalid durations before import", async () => {
+    const z = new JSZip();
+    z.file("hello.txt", "nothing");
+    await expect(
+      inspectBackup(
+        (await z.generateAsync({ type: "uint8array" })) as unknown as Blob,
+      ),
+    ).rejects.toThrow("backup.json");
+    z.file(
+      "backup.json",
+      JSON.stringify({
+        format: "lilly-training",
+        schemaVersion: 1,
+        entries: [
+          {
+            id: "bad",
+            kind: "cardio",
+            data: { seconds: -1, date: "2026-11-19", week: "2026-11-15" },
+          },
+        ],
+      }),
+    );
+    await expect(
+      inspectBackup(
+        (await z.generateAsync({ type: "uint8array" })) as unknown as Blob,
+      ),
+    ).rejects.toThrow("คาร์ดิโอ");
+  });
+  it("stores image bytes separately from record data", async () => {
+    const b = new Blob(["photo"], { type: "image/jpeg" });
+    await storePhoto("test-photo", b);
+    expect(await (await photoBlob("test-photo"))?.text()).toBe("photo");
+  });
+});
