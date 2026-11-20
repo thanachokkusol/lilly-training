@@ -189,9 +189,8 @@ describe("time and reporting", () => {
     expect(m).toContain("✅ สะสมแล้ว: 168 นาที 20 วินาที");
     expect(m).toContain("📈 ทำได้แล้ว: 112.2%");
     expect(m).toContain("เกินมา 18 นาที 20 วินาที");
-    expect(m).toContain(
-      "1. Chest Press: 10 กก./ข้าง × 12 ครั้ง\n   ตั้งเครื่อง: เบาะระดับ 6",
-    );
+    expect(m).toContain("1. Chest Press: 10 กก./ข้าง × 12 ครั้ง");
+    expect(m).not.toContain("ตั้งเครื่อง");
     expect(m).toContain("2. Hip Abduction: 13.5 กก. + 10 ที่หมุน × 10 ครั้ง");
     expect(m).not.toContain("เซต");
   });

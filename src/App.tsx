@@ -1222,8 +1222,21 @@ function MachineDetail({ id, close }: { id: string; close: () => void }) {
       p.kind === "photo" &&
       (p.data.machineId === id ||
         p.id === m.photoId ||
-        p.id === m.referencePhotoId),
+        p.id === m.referencePhotoId ||
+        p.id === `photo-${id}` ||
+        p.id === `photo-${id.replace(/^jett-/, "jett-ref-")}`),
   );
+  async function setMainPhoto(photoId: string) {
+    const old = entries.find(
+      (p) =>
+        p.kind === "photo" &&
+        !p.deleted &&
+        p.id === (m.photoId ?? m.referencePhotoId),
+    );
+    if (old && !old.data.machineId)
+      await save("photo", { ...old.data, machineId: id }, old.id);
+    await save("machine", { ...m, photoId }, id);
+  }
   async function upload(file?: File) {
     if (!file) return;
     await run(async () => {
@@ -1233,7 +1246,7 @@ function MachineDetail({ id, close }: { id: string; close: () => void }) {
         { label: m.name, machineId: id, mime: "image/jpeg" },
         p,
       );
-      await save("machine", { ...m, photoId: p }, id);
+      await setMainPhoto(p);
     }, "เพิ่มรูปและตั้งเป็นรูปหลักแล้ว");
   }
   const begin = () =>
@@ -1335,10 +1348,7 @@ function MachineDetail({ id, close }: { id: string; close: () => void }) {
                 aria-label={p.id === mainPhoto ? "รูปหลัก" : "ตั้งเป็นรูปหลัก"}
                 onClick={() =>
                   p.id !== mainPhoto &&
-                  run(
-                    () => save("machine", { ...m, photoId: p.id }, id),
-                    "ตั้งรูปหลักแล้ว",
-                  )
+                  run(() => setMainPhoto(p.id), "ตั้งรูปหลักแล้ว")
                 }
               >
                 <Photo id={p.id} alt={p.data.label} />

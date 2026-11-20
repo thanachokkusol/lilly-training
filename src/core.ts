@@ -175,7 +175,7 @@ const activityEmoji = (a: string) =>
             ? "🏸"
             : "🔥";
 const slashDate = (d: string) => d.split("-").reverse().join("/");
-/** One line per exercise done on `date`: name, load × reps, then the machine setup. */
+/** One line per exercise done on `date`: name, load × reps, and optional training notes. */
 export function weightLines(entries: Entry[], date: string) {
   const sessions = entries.filter(
     (e) =>
@@ -197,7 +197,6 @@ export function weightLines(entries: Entry[], date: string) {
         )
         .join(" / ");
       let line = `${lines.length + 1}. ${m?.name ?? "เครื่อง"}: ${sets}`;
-      if (x.setup?.trim()) line += `\n   ตั้งเครื่อง: ${x.setup.trim()}`;
       // Notes on imported "reported only" results are provenance, not coach info.
       if (x.note?.trim() && !x.reportedOnly)
         line += `\n   โน้ต: ${x.note.trim()}`;

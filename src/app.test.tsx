@@ -13,6 +13,9 @@ import App from "./App";
 import { save, allEntries } from "./db";
 import { today, weekOf } from "./core";
 vi.stubGlobal("scrollTo", () => {});
+// UI fixtures use their own fake IndexedDB, never this machine's cloud project.
+vi.stubEnv("VITE_SUPABASE_URL", "");
+vi.stubEnv("VITE_SUPABASE_PUBLISHABLE_KEY", "");
 const topDialog = async () => {
   await screen.findAllByRole("dialog");
   return within(screen.getAllByRole("dialog").at(-1)!);
@@ -20,6 +23,73 @@ const topDialog = async () => {
 afterEach(() => {
   cleanup();
   location.hash = "";
+});
+it("keeps both seed and added photos when changing the main photo and recovers a previously hidden seed photo", async () => {
+  const id = "we-photo-regression";
+  const originalId = `photo-${id}`;
+  const secondId = "photo-regression-added";
+  await save(
+    "photo",
+    { label: "Original seed photo", mime: "image/jpeg" },
+    originalId,
+  );
+  await save(
+    "photo",
+    { label: "Added photo", mime: "image/jpeg", machineId: id },
+    secondId,
+  );
+  await save(
+    "machine",
+    {
+      name: "Photo Retention Machine",
+      thai: "",
+      gym: "WE Fitness",
+      group: "อก",
+      setup: "เบาะระดับ 6",
+      cues: "",
+      loadMode: "total",
+      photoId: originalId,
+    },
+    id,
+  );
+  location.hash = "machines";
+  render(<App />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Photo Retention Machine/ }),
+  );
+  let dialog = await topDialog();
+  expect(
+    dialog.getAllByRole("button", { name: /^(รูปหลัก|ตั้งเป็นรูปหลัก)$/ }),
+  ).toHaveLength(2);
+  fireEvent.click(dialog.getByRole("button", { name: "ตั้งเป็นรูปหลัก" }));
+  await waitFor(async () =>
+    expect((await allEntries()).find((e) => e.id === id)?.data.photoId).toBe(
+      secondId,
+    ),
+  );
+  expect(
+    (await allEntries()).find((e) => e.id === originalId)?.data.machineId,
+  ).toBe(id);
+  dialog = await topDialog();
+  expect(
+    dialog.getAllByRole("button", { name: /^(รูปหลัก|ตั้งเป็นรูปหลัก)$/ }),
+  ).toHaveLength(2);
+  expect(dialog.getAllByRole("button", { name: "รูปหลัก" })).toHaveLength(1);
+  cleanup();
+  // Simulate a seed photo hidden by a primary-photo change in an older release.
+  await save(
+    "photo",
+    { label: "Original seed photo", mime: "image/jpeg" },
+    originalId,
+  );
+  render(<App />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Photo Retention Machine/ }),
+  );
+  dialog = await topDialog();
+  expect(
+    dialog.getAllByRole("button", { name: /^(รูปหลัก|ตั้งเป็นรูปหลัก)$/ }),
+  ).toHaveLength(2);
 });
 it("shows remaining time until the full 150-minute goal is reached", async () => {
   await save(
