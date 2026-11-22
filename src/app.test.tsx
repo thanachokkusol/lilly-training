@@ -23,6 +23,7 @@ const topDialog = async () => {
 afterEach(() => {
   cleanup();
   location.hash = "";
+  localStorage.clear();
 });
 it("keeps both seed and added photos when changing the main photo and recovers a previously hidden seed photo", async () => {
   const id = "we-photo-regression";
@@ -164,10 +165,10 @@ it("starts a session, logs two sets in the focused machine view, and reopens the
   );
   expect(stored?.data.status).toBe("completed");
   expect(
-    stored?.data.exercises[0].sets.map((s: any) => [s.load, s.reps, s.done]),
+    stored?.data.exercises[0].sets.map((s: any) => [s.load, s.reps, s.done, s.enteredAs]),
   ).toEqual([
-    [10, 12, true],
-    [12.5, 10, true],
+    [20, 12, true, "perSide"],
+    [25, 10, true, "perSide"],
   ]);
   fireEvent.click(screen.getByRole("button", { name: /Regression Session/ }));
   await screen.findByText(/เสร็จ 1\/1 ท่า/);

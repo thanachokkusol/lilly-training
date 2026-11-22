@@ -18,6 +18,9 @@ export interface Entry {
   conflict?: { data: any; version: number; deleted: boolean };
 }
 export interface Machine {
+  exerciseId?: string;
+  aliases?: string[];
+  label?: string;
   name: string;
   thai: string;
   gym: string;
@@ -31,6 +34,8 @@ export interface Machine {
   archived?: boolean;
 }
 export interface SetLog {
+  /** Present on numeric sets stored in total kilograms. */
+  enteredAs?: "total" | "perSide";
   id: string;
   load: number | null;
   loadText?: string;
@@ -39,6 +44,7 @@ export interface SetLog {
   done: boolean;
 }
 export interface ExerciseLog {
+  originalName?: string;
   reportedOnly?: boolean;
   machineId: string;
   sets: SetLog[];
@@ -47,6 +53,7 @@ export interface ExerciseLog {
   loadMode: Machine["loadMode"];
 }
 export interface Session {
+  gym?: string;
   date: string;
   title: string;
   status: "draft" | "completed" | "historical";

@@ -11,8 +11,32 @@ import {
   exportBackup,
   storePhoto,
   photoBlob,
+  getEntry,
+  moveReviewedSession,
 } from "./db";
 describe("durable records and backup", () => {
+  it("rejects a stale migration review and stores the machine and repointed session together", async () => {
+    const data = {
+      date: "2026-11-22", title: "Migration fixture", status: "completed",
+      exercises: [{ machineId: "move-source", loadMode: "total", note: "", setup: "",
+        sets: [{ id: "move-set", load: null, loadText: "Mรวม25", reps: 12, done: true }] }],
+    };
+    const first = await save("session", data, "move-session");
+    const latest = await save("session", { ...data, note: "Updated after review" }, first.id);
+    const moves = [{
+      from: "move-source", to: "move-target",
+      machine: { name: "Chest Press", thai: "", group: "อก", gym: "M Fitness",
+        loadMode: "total" as const, setup: "", cues: "" },
+    }];
+    await expect(moveReviewedSession(first, "M Fitness", moves)).rejects.toThrow();
+    expect(await getEntry("move-target")).toBeUndefined();
+    await moveReviewedSession(latest, "M Fitness", moves);
+    expect((await getEntry("move-target"))?.data.gym).toBe("M Fitness");
+    expect((await getEntry(first.id))?.data).toMatchObject({
+      gym: "M Fitness", note: latest.data.note,
+      exercises: [{ machineId: "move-target", sets: [{ id: "move-set", load: 25, reps: 12 }] }],
+    });
+  });
   it("persists and recovers soft deleted logs", async () => {
     const e = await save(
       "body",

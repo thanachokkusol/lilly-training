@@ -1037,6 +1037,26 @@ footer span {
 .rest-timer > span {
   flex: 1;
 }
+.rest-timer[data-state="running"] {
+  background: #e8f2e3;
+  color: #284e30;
+}
+.rest-timer[data-state="soon"] {
+  background: #fff0cc;
+  color: #78500c;
+}
+.rest-timer[data-state="expired"] {
+  background: #fae2e0;
+  color: #8c2922;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .rest-timer[data-state="expired"] > span {
+    animation: rest-expired 1.5s ease-in-out 3;
+  }
+}
+@keyframes rest-expired {
+  50% { opacity: 0.55; }
+}
 .rest-timer button {
   background: #e8eddd;
   padding: 5px 9px;

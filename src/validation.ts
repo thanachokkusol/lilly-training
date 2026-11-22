@@ -120,7 +120,15 @@ export function validateEntry(e: Pick<Entry, "id" | "kind" | "data">) {
       ids.add(x.machineId);
     }
   }
-  if (e.kind === "settings") {
+  if (e.kind === "settings" && e.id === "settings-gym-catalog") {
+    if (!Array.isArray(d.gyms) || d.gyms.some((g: any) =>
+      !g || typeof g.id !== "string" || !g.id.trim() || typeof g.name !== "string" ||
+      !g.name.trim() || g.name.length > 80 || typeof g.shortCode !== "string" ||
+      g.shortCode.length > 8 || typeof g.archived !== "boolean"
+    ) || new Set(d.gyms.map((g: any) => g.id)).size !== d.gyms.length ||
+      new Set(d.gyms.map((g: any) => g.name.trim().toLowerCase())).size !== d.gyms.length)
+      throw Error("ข้อมูลยิมไม่ถูกต้องหรือชื่อยิมซ้ำ");
+  } else if (e.kind === "settings") {
     if (
       !Number.isInteger(d.cardioGoal) ||
       d.cardioGoal < 1 ||

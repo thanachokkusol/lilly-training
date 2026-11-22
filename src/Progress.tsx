@@ -10,15 +10,16 @@ import {
   CartesianGrid,
   BarChart,
   Bar,
+  ReferenceLine,
 } from "recharts";
-import type { Session } from "./types";
+import ExerciseChart from "./ExerciseChart";
 import {
   today,
   weekOf,
   addDays,
   dateLabel,
   cardioTotals,
-  loadLabel,
+  exerciseKey,
 } from "./core";
 import { useData, Header, Stat, Empty, BodyForm } from "./App";
 const shortDate = (d: string) =>
@@ -45,34 +46,12 @@ export default function Progress() {
             Number(a.data.gym === "WE Fitness") ||
           a.data.name.localeCompare(b.data.name),
       ),
-    chosen = machine || machines[0]?.id;
+    exercises = Array.from(new Map(machines.map((m) => [exerciseKey(m.data), m])).entries()),
+    chosen = exercises.some(([key]) => key === machine) ? machine : exercises[0]?.[0];
   const chart = bodies.map((e) => ({
     date: dateLabel(e.data.date),
     value: e.data[metric],
   }));
-  const exerciseChart = active
-    .filter(
-      (e) => e.kind === "session" && e.data.status !== "draft" && e.data.date,
-    )
-    .sort((a, b) => a.data.date.localeCompare(b.data.date))
-    .flatMap((e) => {
-      const x = (e.data as Session).exercises.find(
-          (x) => x.machineId === chosen,
-        ),
-        sets =
-          x?.sets.filter(
-            (s) => s.done && !s.warmup && s.load !== null && s.reps !== null,
-          ) ?? [];
-      return sets.length
-        ? [
-            {
-              date: dateLabel(e.data.date),
-              value: Math.max(...sets.map((s) => s.load!)),
-              reps: sets.map((s) => s.reps).join("/"),
-            },
-          ]
-        : [];
-    });
   const weeks = Array.from({ length: 8 }, (_, i) =>
     addDays(weekOf(today()), (i - 7) * 7),
   );
@@ -152,7 +131,7 @@ export default function Progress() {
                   stroke="#476c4c"
                   strokeWidth={3}
                   dot={{ r: 5 }}
-                  connectNulls={false}
+                  connectNulls
                 />
               </LineChart>
             </ResponsiveContainer>
@@ -161,77 +140,13 @@ export default function Progress() {
           <Empty text="ยังไม่มีผลวัดสำหรับตัวชี้วัดนี้" />
         )}
       </section>
-      <section className="panel">
-        <div className="section-title">
-          <div>
-            <h2>ความก้าวหน้ารายเครื่อง</h2>
-            <p>น้ำหนักสูงสุดที่ยืนยันในวันนั้น · ดูจำนวนครั้งประกอบเสมอ</p>
-          </div>
-          <select
-            aria-label="เลือกเครื่องดูกราฟ"
-            value={chosen}
-            onChange={(e) => setMachine(e.target.value)}
-          >
-            {machines.map((e) => (
-              <option key={e.id} value={e.id}>
-                {e.data.gym} · {e.data.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        {machines.find((e) => e.id === chosen)?.data.loadMode ===
-          "assistance" && (
-          <p className="notice">
-            เครื่องแรงช่วย: แรงช่วยที่น้อยลงจึงหมายถึงรับน้ำหนักตัวเองมากขึ้น
-          </p>
-        )}
-        {exerciseChart.length ? (
-          <div className="chart">
-            <ResponsiveContainer>
-              <LineChart
-                data={exerciseChart}
-                margin={{ top: 10, right: 16, left: -12, bottom: 0 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis
-                  dataKey="date"
-                  tick={{ fontSize: 11 }}
-                  padding={{ left: 14, right: 14 }}
-                />
-                <YAxis
-                  domain={["auto", "auto"]}
-                  tick={{ fontSize: 11 }}
-                  width={44}
-                />
-                <Tooltip
-                  content={({ active, payload }) =>
-                    active && payload?.length ? (
-                      <div className="chart-tip">
-                        {payload[0].payload.date}
-                        <br />
-                        {payload[0].value}{" "}
-                        {loadLabel(
-                          machines.find((e) => e.id === chosen)!.data.loadMode,
-                        )}
-                        <br />
-                        ครั้งที่บันทึก: {payload[0].payload.reps}
-                      </div>
-                    ) : null
-                  }
-                />
-                <Line
-                  dataKey="value"
-                  stroke="#476c4c"
-                  strokeWidth={3}
-                  dot={{ r: 5 }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        ) : (
-          <Empty text="ยังไม่มีผลเซตที่ยืนยันสำหรับเครื่องนี้" />
-        )}
-      </section>
+      <label>
+        เลือกท่าดูกราฟ
+        <select value={chosen ?? ""} onChange={(e) => setMachine(e.target.value)}>
+          {exercises.map(([key, m]) => <option key={key} value={key}>{m.data.name}</option>)}
+        </select>
+      </label>
+      <ExerciseChart key={chosen} entries={entries} machines={machines.filter((m) => exerciseKey(m.data) === chosen)} />
       <section className="panel">
         <div className="section-title">
           <h2>คาร์ดิโอ 8 สัปดาห์</h2>
@@ -240,15 +155,16 @@ export default function Progress() {
           <ResponsiveContainer>
             <BarChart
               data={weeks.map((w) => ({
-                week: dateLabel(w).replace(" 2026", ""),
+                week: shortDate(w),
                 minutes: Number(
                   (cardioTotals(active, w).seconds / 60).toFixed(2),
                 ),
               }))}
             >
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="week" tick={{ fontSize: 10 }} />
-              <YAxis />
+              <XAxis dataKey="week" tick={{ fontSize: 11 }} />
+              <YAxis tick={{ fontSize: 11 }} domain={[0, (max: number) => Math.max(150, max)]} />
+              <ReferenceLine y={150} stroke="#476c4c" strokeDasharray="5 4" label="เป้า 150" />
               <Tooltip />
               <Bar
                 name="นาที"

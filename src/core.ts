@@ -1,4 +1,54 @@
-import type { Entry, Session, LoadMode, SetLog, ExerciseLog } from "./types";
+import type { Entry, Session, LoadMode, SetLog, ExerciseLog, Machine } from "./types";
+
+export const exerciseKey = (machine: Machine) =>
+  machine.exerciseId ?? machine.name.normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
+
+export function machinePhotoIds(entries: Entry[], machineId: string, machine: Machine) {
+  const jettPhotos = new Set(entries.flatMap((e) =>
+    e.kind === "machine" && e.data.gym === "Jett" && e.data.photoId ? [e.data.photoId] : [],
+  ));
+  const belongs = (id: string) =>
+    machine.gym === "Jett" || (!id.startsWith("photo-jett-") && !jettPhotos.has(id));
+  const photos = entries.filter((e) => e.kind === "photo" && !e.deleted && belongs(e.id) &&
+    (e.data.machineId === machineId || e.id === machine.photoId || e.id === machine.referencePhotoId ||
+      e.id === `photo-${machineId}` ||
+      (machine.gym === "Jett" && e.id === `photo-${machineId.replace(/^jett-/, "jett-ref-")}`)));
+  const preferred = [machine.photoId, machine.referencePhotoId].filter(
+    (id): id is string => !!id && belongs(id) && !entries.some((e) => e.id === id && e.deleted),
+  );
+  return { photos, main: preferred[0] ?? photos[0]?.id };
+}
+
+export function exerciseProgress(entries: Entry[], machineIds: string[]) {
+  const allowed = new Set(machineIds);
+  const previous = new Map<string, number>();
+  let index = 1;
+  return entries
+    .filter((e) => e.kind === "session" && !e.deleted && e.data.date && e.data.status !== "draft")
+    .sort((a, b) => a.data.date.localeCompare(b.data.date) || a.updatedAt.localeCompare(b.updatedAt))
+    .flatMap((entry) => {
+      const results = new Map<string, { best: { kg: number; reps: number; estimate: number }; heaviest: { kg: number; reps: number } }>();
+      for (const exercise of (entry.data as Session).exercises) {
+        if (!allowed.has(exercise.machineId) || !["total", "per-side"].includes(exercise.loadMode)) continue;
+        for (const set of exercise.sets) {
+          if (!set.done || set.warmup || set.load === null || set.load <= 0 || !set.reps || set.reps <= 0) continue;
+          const kg = totalLoad(set, exercise.loadMode)!;
+          const point = { kg, reps: set.reps, estimate: kg * (1 + set.reps / 30) };
+          const result = results.get(exercise.machineId);
+          results.set(exercise.machineId, {
+            best: result && result.best.estimate >= point.estimate ? result.best : point,
+            heaviest: result && result.heaviest.kg >= kg ? result.heaviest : point,
+          });
+        }
+      }
+      return Array.from(results, ([machineId, { best, heaviest }]) => {
+        const baseline = previous.get(machineId);
+        if (baseline !== undefined) index *= best.estimate / baseline;
+        previous.set(machineId, best.estimate);
+        return { date: entry.data.date as string, machineId, percent: (index - 1) * 100, best, heaviest };
+      });
+    });
+}
 export const today = () =>
   new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Bangkok",
@@ -56,11 +106,15 @@ export const loadLabel = (mode: LoadMode) =>
     assistance: "กก. แรงช่วย",
     bodyweight: "น้ำหนักตัว",
   })[mode];
+export const totalLoad = (set: SetLog, mode: LoadMode) =>
+  set.load === null ? null : set.load * (!set.enteredAs && mode === "per-side" ? 2 : 1);
 export const loadText = (s: SetLog, mode: LoadMode) =>
   mode === "bodyweight"
     ? "น้ำหนักตัว"
     : s.load !== null
-      ? `${s.load} ${loadLabel(mode)}`
+      ? mode === "assistance"
+        ? `${s.load} ${loadLabel(mode)}`
+        : `${totalLoad(s, mode)} กก.${(s.enteredAs === "perSide" || (!s.enteredAs && mode === "per-side")) ? ` (ข้างละ ${totalLoad(s, mode)! / 2})` : ""}`
       : s.loadText?.trim() || "ไม่ทราบน้ำหนัก";
 export const formatSet = (s: SetLog, mode: LoadMode) =>
   `${loadText(s, mode)} × ${s.reps ?? "ไม่ทราบ"} ครั้ง`;
@@ -125,12 +179,14 @@ export function bestSet(entries: Entry[], machineId: string) {
   for (const h of machineHistory(entries, machineId))
     for (const s of h.exercise.sets) {
       if (!s.done || s.warmup || s.load === null) continue;
+      const load = totalLoad(s, h.exercise.loadMode)!;
+      const bestLoad = best ? totalLoad(best.set, best.mode)! : 0;
       const better =
         !best ||
         (h.exercise.loadMode === "assistance"
-          ? s.load < best.set.load!
-          : s.load > best.set.load!) ||
-        (s.load === best.set.load && (s.reps ?? 0) > (best.set.reps ?? 0));
+          ? load < bestLoad
+          : load > bestLoad) ||
+        (load === bestLoad && (s.reps ?? 0) > (best.set.reps ?? 0));
       if (better)
         best = { date: h.entry.data.date, set: s, mode: h.exercise.loadMode };
     }

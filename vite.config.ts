@@ -14,6 +14,7 @@ export default defineConfig({
         manualChunks(id) {
           if (/node_modules[\/](react|react-dom|scheduler)[\/]/.test(id))
             return "react";
+          if (/node_modules[\/]recharts[\/]/.test(id)) return "charts";
         },
       },
     },

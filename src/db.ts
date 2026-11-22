@@ -1,7 +1,8 @@
 import { openDB } from "idb";
-import type { Entry, Kind } from "./types";
+import type { Entry, Kind, Session } from "./types";
 import { validateEntry } from "./validation";
-import { today } from "./core";
+import { exerciseKey, today } from "./core";
+import { planSessionMove, type MachineMove } from "./migration";
 const loadZip = () => import("jszip").then((m) => m.default);
 export const sandbox =
   typeof location !== "undefined" &&
@@ -24,6 +25,63 @@ export async function getEntry(id: string): Promise<Entry | undefined> {
 }
 export async function putEntry(e: Entry) {
   await (await db).put("entries", e);
+}
+export async function mergeExerciseGroups(sourceKey: string, targetKey: string) {
+  if (sourceKey === targetKey) throw Error("เลือกท่าที่ต่างกัน");
+  const tx = (await db).transaction("entries", "readwrite");
+  const entries = (await tx.store.getAll()) as Entry[];
+  const machines = entries.filter((e) => e.kind === "machine");
+  const source = machines.filter((e) => exerciseKey(e.data) === sourceKey);
+  const target = machines.filter((e) => exerciseKey(e.data) === targetKey);
+  const canonical = target.find((e) => !e.deleted)?.data;
+  const affected = [...source, ...target];
+  if (!source.some((e) => !e.deleted) || !canonical || affected.some((e) => e.conflict))
+    throw Error("ไม่พบทั้งสองท่าหรือมีรายการรอแก้ข้อขัดแย้ง");
+  const aliases = [...new Set<string>(affected.flatMap((e) =>
+    [e.data.name, e.data.thai, ...(e.data.aliases ?? [])].filter(Boolean),
+  ))].filter((name) => name !== canonical.name && name !== canonical.thai);
+  const updatedAt = new Date().toISOString();
+  const changes: Entry[] = affected.map((e) => ({
+    ...e, updatedAt, dirty: true,
+    data: { ...e.data, exerciseId: targetKey, name: canonical.name,
+      thai: canonical.thai, group: canonical.group, aliases },
+  }));
+  const oldNames = new Map(source.map((e) => [e.id, e.data.name as string]));
+  for (const entry of entries) {
+    if (entry.kind !== "session") continue;
+    const session = entry.data as Session;
+    if (!session.exercises.some((exercise) => oldNames.has(exercise.machineId) && !exercise.originalName)) continue;
+    if (entry.conflict) throw Error("พบครั้งฝึกที่รอแก้ข้อขัดแย้ง กรุณาแก้ก่อนรวมท่า");
+    changes.push({ ...entry, updatedAt, dirty: true, data: {
+      ...session,
+      exercises: session.exercises.map((exercise) => ({
+        ...exercise,
+        originalName: exercise.originalName ?? oldNames.get(exercise.machineId),
+      })),
+    } });
+  }
+  changes.forEach(validateEntry);
+  await Promise.all([...changes.map((e) => tx.store.put(e)), tx.done]);
+}
+export async function moveReviewedSession(
+  expected: Entry,
+  gym: string,
+  moves: MachineMove[],
+) {
+  const tx = (await db).transaction("entries", "readwrite");
+  const entries = await tx.store.getAll() as Entry[];
+  const current = entries.find((entry) => entry.id === expected.id);
+  if (JSON.stringify(current) !== JSON.stringify(expected)) {
+    throw Error("ครั้งฝึกเปลี่ยนหลังตรวจ กรุณาตรวจข้อมูลล่าสุดก่อนย้าย");
+  }
+  const updatedAt = new Date().toISOString();
+  const changes = planSessionMove(entries, expected.id, gym, moves);
+  await Promise.all([...changes.map((change) => tx.store.put({
+    ...change,
+    updatedAt,
+    version: change.id === expected.id ? expected.version : 0,
+    dirty: true,
+  })), tx.done]);
 }
 export async function save(
   kind: Kind,

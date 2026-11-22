@@ -59,6 +59,8 @@ import {
   importBackup,
   inspectBackup,
   download,
+  mergeExerciseGroups,
+  moveReviewedSession,
 } from "./db";
 import {
   today,
@@ -79,9 +81,15 @@ import {
   bestSet,
   hasLoad,
   weightLines,
+  exerciseKey,
+  machinePhotoIds,
+  totalLoad,
 } from "./core";
 import { cloud, config, configure, sync, resolveConflict } from "./cloud";
 const Progress = lazy(() => import("./Progress"));
+import ExerciseChart from "./ExerciseChart";
+import { gymCatalogId, gymName, gymsFor, type Gym } from "./gyms";
+import { planSessionMove, type MachineMove } from "./migration";
 type Context = {
   entries: Entry[];
   refresh: () => Promise<void>;
@@ -107,14 +115,26 @@ const shortDate = (d: string) =>
     month: "short",
     timeZone: "UTC",
   }).format(new Date(d + "T12:00:00Z"));
-function exerciseFor(machine: Entry): ExerciseLog {
+function exerciseFor(machine: Entry, entries: Entry[] = [], date = today(), sessionId?: string): ExerciseLog {
   const m = machine.data as Machine;
+  const last = latestExercise(entries, machine.id, date, sessionId)?.exercise;
+  const comparable = last && (last.loadMode === m.loadMode ||
+    (["total", "per-side"].includes(last.loadMode) && ["total", "per-side"].includes(m.loadMode)));
+  const previous = comparable && !last.reportedOnly
+    ? last.sets.filter((set) => set.done)
+    : [];
   return {
     machineId: machine.id,
     setup: m.setup,
     loadMode: m.loadMode,
     note: "",
-    sets: [{ id: uid(), load: null, reps: null, warmup: false, done: false }],
+    sets: previous.length
+      ? previous.map((set) => ({
+          ...set, id: uid(), done: false,
+          load: totalLoad(set, last!.loadMode),
+          enteredAs: set.enteredAs ?? (last!.loadMode === "per-side" ? "perSide" : "total"),
+        }))
+      : [{ id: uid(), load: null, reps: null, warmup: false, done: false }],
   };
 }
 function newSession(
@@ -122,15 +142,17 @@ function newSession(
   machineIds: string[],
   entries: Entry[],
   date = today(),
+  gym?: string,
 ): Session {
   return {
     date,
+    gym,
     title,
     status: "draft",
     note: "",
     exercises: machineIds.flatMap((id) => {
       const m = entries.find((e) => e.id === id && e.kind === "machine");
-      return m ? [exerciseFor(m)] : [];
+      return m ? [exerciseFor(m, entries, date)] : [];
     }),
   };
 }
@@ -306,8 +328,50 @@ function Ring({ value, size = 110 }: { value: number; size?: number }) {
     </div>
   );
 }
+function viewStorageKey(name: string) {
+  const cloudUrl = config()?.url;
+  return `lilly-view:${sandbox ? "sandbox" : cloudUrl ?? "local"}:${name}`;
+}
+
+function readView(name: string): string | null {
+  try {
+    const saved = JSON.parse(localStorage.getItem(viewStorageKey(name)) ?? "null");
+    return saved && Date.now() - saved.at < 12 * 60 * 60 * 1000 ? saved.value : null;
+  }
+  catch { return null; }
+}
+
+function writeView(name: string, value: string | null) {
+  try {
+    if (value === null) localStorage.removeItem(viewStorageKey(name));
+    else localStorage.setItem(viewStorageKey(name), JSON.stringify({ value, at: Date.now() }));
+  } catch { /* Views can still open when storage is unavailable. */ }
+}
+
+function useRememberedView(name: string, fallback: string | null = null) {
+  const [value, setValue] = useState(() => readView(name) ?? fallback);
+  return [value, (next: string | null) => {
+    writeView(name, next);
+    setValue(next);
+  }] as const;
+}
+
 function useNavigate() {
-  const [page, setPage] = useState(location.hash.slice(1) || "today");
+  const [page, setPage] = useState(() => {
+    if (location.hash) return location.hash.slice(1);
+    try {
+      const saved = JSON.parse(localStorage.getItem("lilly-last-page") ?? "null");
+      if (saved && typeof saved.page === "string" &&
+          /^(today|machines|cardio(?:#report)?|progress|history|settings)$/.test(saved.page) &&
+          Date.now() - saved.at < 12 * 60 * 60 * 1000) return saved.page;
+    } catch { /* An unavailable route cache should never prevent startup. */ }
+    return "today";
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("lilly-last-page", JSON.stringify({ page, at: Date.now() }));
+    } catch { /* Navigation still works without storage. */ }
+  }, [page]);
   useEffect(() => {
     const listener = () => setPage(location.hash.slice(1) || "today");
     window.addEventListener("hashchange", listener);
@@ -334,6 +398,7 @@ export default function App() {
     [page, nav] = useNavigate(),
     [online, setOnline] = useState(navigator.onLine),
     [busy, setBusy] = useState(false),
+    [initialSync, setInitialSync] = useState<string | null>(null),
     [login, setLogin] = useState(false),
     [authUser, setAuthUser] = useState<string | null>(
       config() ? null : "local",
@@ -341,6 +406,7 @@ export default function App() {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
+  const syncing = useRef(false);
   const refresh = async () => {
     setEntries(await allEntries());
     setLoaded(true);
@@ -348,7 +414,7 @@ export default function App() {
   const notify = (s: string) => {
     setToast(s);
     clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(""), 6000);
+    toastTimer.current = setTimeout(() => setToast(""), 3000);
   };
   const run = async (fn: () => Promise<unknown>, msg?: string) => {
     try {
@@ -360,18 +426,21 @@ export default function App() {
     }
   };
   const synchronize = async (silent = false) => {
-    if (busy) return;
+    if (syncing.current) return;
+    syncing.current = true;
     setBusy(true);
     try {
       const r = await sync();
       await refresh();
-      if (!silent)
+      if (!silent && (r.pushed || r.conflicts))
         notify(
           `ซิงก์แล้ว · ส่ง ${r.pushed} รายการ${r.conflicts ? ` · รอเลือกฉบับ ${r.conflicts} รายการ` : ""}`,
         );
     } catch (e) {
       if (!silent) notify(e instanceof Error ? e.message : String(e));
     } finally {
+      setInitialSync(authUser);
+      syncing.current = false;
       setBusy(false);
     }
   };
@@ -464,6 +533,22 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: "instant" });
   }, [page]);
   const pending = entries.filter((e) => e.dirty).length;
+  const canSync = Boolean(cloudUrl && authUser && authUser !== "local");
+  const hasPushable = entries.some((e) => e.dirty && !e.conflict);
+  useEffect(() => {
+    if (!canSync || !online || !hasPushable) return;
+    const timer = setTimeout(() => void synchronize(true), 2000);
+    return () => clearTimeout(timer);
+  }, [canSync, online, entries, hasPushable]);
+  useEffect(() => {
+    if (!cloudUrl || !pending) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [cloudUrl, pending]);
   const tabs = [
     ["today", "วันนี้", LayoutDashboard],
     ["machines", "เครื่องและท่า", Dumbbell],
@@ -562,7 +647,7 @@ export default function App() {
                   </div>
                 }
               />
-            ) : !loaded ? (
+            ) : !loaded || (canSync && online && initialSync !== authUser) ? (
               <Empty text="กำลังเปิดสมุดฝึก…" />
             ) : page === "today" ? (
               <Today nav={nav} />
@@ -622,11 +707,24 @@ export default function App() {
     </Data.Provider>
   );
 }
+function sessionGyms(entries: Entry[], session: Session): string[] {
+  if (session.gym) return [session.gym];
+  return [...new Set(session.exercises.flatMap((exercise) => {
+    const gym = entries.find((e) => e.kind === "machine" && e.id === exercise.machineId)?.data.gym;
+    return typeof gym === "string" && gym ? [gym] : [];
+  }))];
+}
+
+const cardioSummary = (cardio: Cardio) =>
+  [minuteDuration(cardio.seconds), cardio.distance != null && `${cardio.distance} กม.`]
+    .filter(Boolean).join(" · ");
+
 function Today({ nav }: { nav: (p: string) => void }) {
   const { entries, run, refresh } = useData(),
     [start, setStart] = useState(false),
-    [session, setSession] = useState<string | null>(null),
-    [machineDetail, setMachineDetail] = useState<string | null>(null);
+    [cardioId, setCardioId] = useState<string | null>(null),
+    [session, setSession] = useRememberedView("today-session"),
+    [machineDetail, setMachineDetail] = useRememberedView("today-machine");
   const active = entries.filter((e) => !e.deleted),
     now = today(),
     week = weekOf(now),
@@ -647,25 +745,15 @@ function Today({ nav }: { nav: (p: string) => void }) {
     machines = active.filter((e) => e.kind === "machine" && !e.data.archived),
     last = active
       .filter(
-        (e) => e.kind === "session" && e.data.date && e.data.status !== "draft",
+        (e) => e.data.date && (e.kind === "cardio" || (e.kind === "session" && e.data.status !== "draft")),
       )
-      .sort((a, b) => b.data.date.localeCompare(a.data.date))
+      .sort((a, b) => b.data.date.localeCompare(a.data.date) || b.updatedAt.localeCompare(a.updatedAt))
       .slice(0, 4);
-  const startRoutine = (r: Entry) =>
-    run(async () => {
-      const e = await save(
-        "session",
-        newSession(
-          r.data.title,
-          r.data.machineIds.filter((id: string) =>
-            machines.some((m) => m.id === id),
-          ),
-          entries,
-        ),
-      );
-      await refresh();
-      setSession(e.id);
-    });
+  const [routine, setRoutine] = useState<Entry | null>(null);
+  const startRoutine = (r: Entry) => {
+    setRoutine(r);
+    setStart(true);
+  };
   return (
     <>
       <Header title="วันนี้" subtitle={longDate(now)} />
@@ -788,14 +876,13 @@ function Today({ nav }: { nav: (p: string) => void }) {
         />
       </div>
       <div className="section-title">
-        <h2>เครื่อง WE Fitness</h2>
+        <h2>เครื่องและท่า</h2>
         <button className="text-button" onClick={() => nav("machines")}>
           ทั้งหมด <ChevronRight size={17} />
         </button>
       </div>
       <div className="machine-grid compact">
-        {machines
-          .filter((e) => e.data.gym === "WE Fitness")
+        {exerciseCards(entries, machines)
           .slice(0, 6)
           .map((e) => (
             <MachineTile
@@ -825,35 +912,45 @@ function Today({ nav }: { nav: (p: string) => void }) {
         <button
           className="history-row"
           key={e.id}
-          onClick={() => setSession(e.id)}
+          onClick={() => e.kind === "cardio" ? setCardioId(e.id) : setSession(e.id)}
         >
           <span className="icon-disc">
-            <Dumbbell size={20} />
+            {e.kind === "cardio" ? <Footprints size={20} /> : <Dumbbell size={20} />}
           </span>
           <div>
-            <strong>{e.data.title}</strong>
+            <strong>{e.kind === "cardio" ? e.data.activity : e.data.title}</strong>
             <small>
               {dateLabel(e.data.date)} ·{" "}
-              {e.data.exercises.length
-                ? `${e.data.exercises.length} ท่า`
-                : "บันทึกจากสมุดเดิม"}
+              {e.kind === "cardio"
+                ? [cardioSummary(e.data), e.data.status === "review" && "รอตรวจ"].filter(Boolean).join(" · ")
+                : [e.data.exercises.length ? `${e.data.exercises.length} ท่า` : "บันทึกจากสมุดเดิม",
+                    ...sessionGyms(entries, e.data).map((id) => gymName(entries, id))].join(" · ")}
             </small>
           </div>
           <ChevronRight size={18} />
         </button>
       ))}
+      {cardioId && entries.some((e) => e.id === cardioId && !e.deleted) && (
+        <CardioForm entry={entries.find((e) => e.id === cardioId)} close={() => setCardioId(null)} />
+      )}
       {start && (
         <StartSession
-          close={() => setStart(false)}
+          initial={routine?.data.machineIds}
+          initialTitle={routine?.data.title}
+          close={() => { setStart(false); setRoutine(null); }}
           done={(id) => {
             setStart(false);
+            setRoutine(null);
             setSession(id);
           }}
         />
       )}
-      {session && <SessionEditor id={session} close={() => setSession(null)} />}
-      {machineDetail && (
+      {session && active.some((e) => e.id === session && e.kind === "session") &&
+        <SessionEditor id={session} close={() => setSession(null)} />}
+      {machineDetail && active.some((e) => e.id === machineDetail && e.kind === "machine") && (
         <MachineDetail
+          key={machineDetail}
+          selectMachine={setMachineDetail}
           id={machineDetail}
           close={() => setMachineDetail(null)}
         />
@@ -902,12 +999,89 @@ function workoutMessage(s: Session, entries: Entry[]) {
   );
   return `🏋️ อัปเดตเวท ${dateLabel(s.date)} (${lines.length} ท่า)\n${lines.join("\n")}${s.note.trim() ? `\n\n${s.note.trim()}` : ""}`;
 }
+function MissingGymMachines({
+  gym, entries, choose, query = "",
+}: {
+  gym: string;
+  entries: Entry[];
+  choose: (machine: Entry) => void;
+  query?: string;
+}) {
+  const { run } = useData();
+  const creating = useRef(false);
+  const available = entries.filter((entry) => entry.kind === "machine" && !entry.deleted && !entry.data.archived);
+  const local = new Set(available.filter((entry) => entry.data.gym === gym).map((entry) => exerciseKey(entry.data)));
+  const missing = exerciseCards(entries, available.filter((entry) =>
+    !local.has(exerciseKey(entry.data)) &&
+    [entry.data.name, entry.data.thai, ...(entry.data.aliases ?? [])].join(" ").toLowerCase().includes(query.toLowerCase()),
+  ));
+  const create = (source: Entry, file?: File) => {
+    if (creating.current) return;
+    creating.current = true;
+    void run(async () => {
+      try {
+        const m = source.data as Machine;
+        const existing = (await allEntries()).find((entry) =>
+          entry.kind === "machine" && !entry.deleted && !entry.data.archived &&
+          entry.data.gym === gym && exerciseKey(entry.data) === exerciseKey(m),
+        );
+        if (existing) {
+          choose(existing);
+          return;
+        }
+        const id = uid();
+        const photoId = file ? await addPhoto(file, `${gym} · ${m.name}`) : undefined;
+        if (photoId) await save("photo", { label: m.name, mime: "image/jpeg", machineId: id }, photoId);
+        const machine: Machine = {
+          exerciseId: m.exerciseId,
+          name: m.name,
+          thai: m.thai,
+          aliases: m.aliases,
+          group: m.group,
+          gym,
+          setup: "",
+          cues: "",
+          loadMode: "total",
+          photoId,
+        };
+        choose(await save("machine", machine, id));
+      } finally {
+        creating.current = false;
+      }
+    });
+  };
+  return missing.length > 0 && (
+    <details open={query ? true : undefined}>
+      <summary>ท่าที่ยังไม่มีเครื่องที่ {gymName(entries, gym)}</summary>
+      {missing.map((entry) => (
+        <div className="notice" key={entry.id}>
+          <p>ยังไม่มีเครื่อง {entry.data.name} ที่ {gymName(entries, gym)}</p>
+          <div className="upload-row">
+            <label className="secondary">
+              ถ่ายรูปเพิ่มเครื่อง
+              <input hidden type="file" accept="image/*" capture="environment" onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) create(entry, file);
+              }} />
+            </label>
+            <button type="button" className="text-button" onClick={() => create(entry)}>
+              บันทึกไปก่อน เพิ่มรูปทีหลัง
+            </button>
+          </div>
+        </div>
+      ))}
+    </details>
+  );
+}
+
 function MachinePicker({
   excluded,
+  gym,
   choose,
   close,
 }: {
   excluded: string[];
+  gym?: string;
   choose: (m: Entry) => void;
   close: () => void;
 }) {
@@ -928,6 +1102,7 @@ function MachinePicker({
               e.kind === "machine" &&
               !e.deleted &&
               !e.data.archived &&
+              (!gym || e.data.gym === gym) &&
               !excluded.includes(e.id) &&
               `${e.data.name} ${e.data.thai}`
                 .toLowerCase()
@@ -938,12 +1113,13 @@ function MachinePicker({
               <span>
                 {e.data.name}
                 <small>
-                  {e.data.gym} · {e.data.thai}
+                  {gymName(entries, e.data.gym)} · {e.data.thai}
                 </small>
               </span>
               <Plus size={17} />
             </button>
           ))}
+        {gym && <MissingGymMachines gym={gym} entries={entries} choose={choose} query={query} />}
       </div>
     </Modal>
   );
@@ -1065,7 +1241,7 @@ function RoutineSettings() {
                 />
                 <span>
                   {m.data.name}
-                  <small>{m.data.gym}</small>
+                  <small>{gymName(entries, m.data.gym)}</small>
                 </span>
                 {selected.includes(m.id) && <b>{selected.indexOf(m.id) + 1}</b>}
               </label>
@@ -1077,6 +1253,25 @@ function RoutineSettings() {
     </section>
   );
 }
+function exerciseCards(entries: Entry[], machines: Entry[]) {
+  const byExercise = new Map<string, { machine: Entry; date: string }>();
+  for (const machine of machines) {
+    const key = exerciseKey(machine.data);
+    const last = latestExercise(entries, machine.id, today())?.entry;
+    const date = last ? `${last.data.date}/${last.updatedAt}` : "";
+    const current = byExercise.get(key);
+    if (!current || date > current.date) byExercise.set(key, { machine, date });
+  }
+  return Array.from(byExercise.values(), ({ machine }) => machine);
+}
+
+function machineVariants(entries: Entry[], machine: Machine) {
+  return entries.filter((e) =>
+    e.kind === "machine" && !e.deleted && !e.data.archived &&
+    exerciseKey(e.data) === exerciseKey(machine),
+  );
+}
+
 function MachineTile({ e, onClick }: { e: Entry; onClick: () => void }) {
   const { entries } = useData(),
     m = e.data as Machine,
@@ -1084,16 +1279,16 @@ function MachineTile({ e, onClick }: { e: Entry; onClick: () => void }) {
   return (
     <button className="machine-tile" onClick={onClick}>
       <div className="machine-photo">
-        <Photo id={m.photoId ?? m.referencePhotoId} alt={m.name} />
-        <span className="gym-label">{m.gym}</span>
-        {!m.photoId && m.referencePhotoId && (
-          <span className="reference-label">รูปอ้างอิง Jett</span>
-        )}
+        <Photo id={machinePhotoIds(entries, e.id, m).main} alt={m.name} />
+        <span className="gym-label">{gymsFor(entries).find((gym) => gym.id === m.gym)?.shortCode || gymName(entries, m.gym)}</span>
       </div>
       <div className="machine-copy">
         <small>{m.group}</small>
         <h3>{m.name}</h3>
         <p>{m.thai}</p>
+        <p className="muted">
+          มีเครื่องที่: {[...new Set(machineVariants(entries, m).map((x) => gymName(entries, x.data.gym)))].join(" · ")}
+        </p>
         <div className="last-load">
           {last ? (
             <>
@@ -1117,10 +1312,11 @@ function MachineTile({ e, onClick }: { e: Entry; onClick: () => void }) {
 function Machines() {
   const { entries } = useData(),
     [query, setQuery] = useState(""),
-    [gym, setGym] = useState("WE Fitness"),
+    [gym, setGym] = useState(""),
     [group, setGroup] = useState("ทั้งหมด"),
-    [selected, setSelected] = useState<string | null>(null),
+    [selected, setSelected] = useRememberedView("machine-detail"),
     [create, setCreate] = useState(false),
+    [merge, setMerge] = useState(false),
     [showArchived, setShowArchived] = useState(false);
   const machines = entries.filter(
     (e) =>
@@ -1129,13 +1325,14 @@ function Machines() {
       (!e.data.archived || showArchived) &&
       (!gym || e.data.gym === gym) &&
       (group === "ทั้งหมด" || e.data.group === group) &&
-      `${e.data.name} ${e.data.thai}`
+      [e.data.name, e.data.thai, ...(e.data.aliases ?? [])].join(" ")
         .toLowerCase()
         .includes(query.toLowerCase()),
   );
   return (
     <>
       <Header title="เครื่องและท่า" subtitle="รูปเครื่อง การตั้งเบาะ และผลครั้งก่อน">
+        <button className="secondary" onClick={() => setMerge(true)}>รวมท่า</button>
         <button className="primary" onClick={() => setCreate(true)}>
           <Plus size={18} />
           เพิ่มเครื่อง / ท่า
@@ -1156,9 +1353,8 @@ function Machines() {
           value={gym}
           onChange={(e) => setGym(e.target.value)}
         >
-          <option value="WE Fitness">WE Fitness</option>
-          <option value="Jett">Jett · สถิติเก่า</option>
           <option value="">ทุกสถานที่</option>
+          {gymsFor(entries).map((item) => <option key={item.id} value={item.id}>{item.name}{item.id === "Jett" ? " · สถิติเก่า" : ""}</option>)}
         </select>
       </div>
       <div className="chips">
@@ -1183,22 +1379,28 @@ function Machines() {
         แสดงเครื่องที่เก็บเข้าคลัง
       </label>
       <div className="machine-grid">
-        {machines.map((e) => (
+        {exerciseCards(entries, machines).map((e) => (
           <MachineTile key={e.id} e={e} onClick={() => setSelected(e.id)} />
         ))}
       </div>
       {!machines.length && <Empty text="ยังไม่มีเครื่องในหมวดนี้" />}
-      {selected && (
-        <MachineDetail id={selected} close={() => setSelected(null)} />
+      {selected && entries.some((e) => e.id === selected && e.kind === "machine" && !e.deleted) && (
+        <MachineDetail key={selected} id={selected} close={() => setSelected(null)} selectMachine={setSelected} />
       )}{" "}
       {create && <MachineForm close={() => setCreate(false)} />}
+      {merge && <MergeExercises close={() => setMerge(false)} />}
     </>
   );
 }
-function MachineDetail({ id, close }: { id: string; close: () => void }) {
+function MachineDetail({ id, close, selectMachine }: {
+  id: string;
+  close: () => void;
+  selectMachine: (id: string) => void;
+}) {
   const { entries, run, refresh } = useData(),
     e = entries.find((e) => e.id === id),
     [edit, setEdit] = useState(false),
+    [addVariant, setAddVariant] = useState(false),
     [beginBusy, setBeginBusy] = useState(false),
     [showAll, setShowAll] = useState(false),
     [session, setSession] = useState<string | null>(null);
@@ -1213,25 +1415,17 @@ function MachineDetail({ id, close }: { id: string; close: () => void }) {
           x.kind === "session" &&
           !x.deleted &&
           x.data.status === "draft" &&
+          sessionGyms(entries, x.data).every((gym) => gym === m.gym) &&
           x.data.date === today(),
       )
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
-  const photos = entries.filter(
-    (p) =>
-      !p.deleted &&
-      p.kind === "photo" &&
-      (p.data.machineId === id ||
-        p.id === m.photoId ||
-        p.id === m.referencePhotoId ||
-        p.id === `photo-${id}` ||
-        p.id === `photo-${id.replace(/^jett-/, "jett-ref-")}`),
-  );
+  const { photos, main: mainPhoto } = machinePhotoIds(entries, id, m);
   async function setMainPhoto(photoId: string) {
     const old = entries.find(
       (p) =>
         p.kind === "photo" &&
         !p.deleted &&
-        p.id === (m.photoId ?? m.referencePhotoId),
+        p.id === mainPhoto,
     );
     if (old && !old.data.machineId)
       await save("photo", { ...old.data, machineId: id }, old.id);
@@ -1259,7 +1453,7 @@ function MachineDetail({ id, close }: { id: string; close: () => void }) {
           if (!d.exercises.some((x) => x.machineId === id))
             await save(
               "session",
-              { ...d, exercises: [...d.exercises, exerciseFor(e)] },
+              { ...d, gym: m.gym, exercises: [...d.exercises, exerciseFor(e, entries, d.date, draft.id)] },
               draft.id,
             );
           await refresh();
@@ -1267,7 +1461,7 @@ function MachineDetail({ id, close }: { id: string; close: () => void }) {
         } else {
           const entry = await save(
             "session",
-            newSession("ฝึกเวท", [id], entries),
+            newSession("ฝึกเวท", [id], entries, today(), m.gym),
           );
           await refresh();
           setSession(entry.id);
@@ -1276,19 +1470,24 @@ function MachineDetail({ id, close }: { id: string; close: () => void }) {
         setBeginBusy(false);
       }
     });
-  const mainPhoto = m.photoId ?? m.referencePhotoId;
   return (
     <Modal title={m.name} close={close}>
+      <div className="chips" aria-label="เลือกเครื่อง">
+        {machineVariants(entries, m).map((variant) => (
+          <button key={variant.id} className={variant.id === id ? "selected" : ""}
+            aria-pressed={variant.id === id} onClick={() => selectMachine(variant.id)}>
+            {gymName(entries, variant.data.gym)}{variant.data.label ? ` · ${variant.data.label}` : ""}
+          </button>
+        ))}
+        <button onClick={() => setAddVariant(true)}>เพิ่มเครื่องของท่านี้</button>
+      </div>
       <div className="detail-photo">
         <Photo id={mainPhoto} alt={m.name} />
-        {!m.photoId && m.referencePhotoId && (
-          <span className="reference-label">รูปอ้างอิงจาก Jett</span>
-        )}
       </div>
       <div className="detail-body">
         <div className="focus-title">
           <small>
-            {m.gym} · {m.group} · {loadLabel(m.loadMode)}
+            {gymName(entries, m.gym)} · {m.group} · {loadLabel(m.loadMode)}
           </small>
           <h3>{m.name}</h3>
           {m.thai && <p className="muted">{m.thai}</p>}
@@ -1413,6 +1612,9 @@ function MachineDetail({ id, close }: { id: string; close: () => void }) {
             <p className="muted">ยังไม่มีผลที่บันทึก</p>
           )}
         </div>
+          <ExerciseChart entries={entries} machines={entries.filter((item) =>
+            item.kind === "machine" && !item.deleted && exerciseKey(item.data) === exerciseKey(m)
+          )} />
         <div className="upload-row">
           <button className="secondary" onClick={() => setEdit(true)}>
             แก้ไขรายละเอียด
@@ -1432,7 +1634,7 @@ function MachineDetail({ id, close }: { id: string; close: () => void }) {
         <div className="sticky-actions">
           <button
             className="primary wide"
-            disabled={beginBusy || !!m.archived}
+            disabled={beginBusy || !!m.archived || gymsFor(entries).some((gym) => gym.id === m.gym && gym.archived)}
             onClick={begin}
           >
             <Plus size={18} />
@@ -1449,6 +1651,13 @@ function MachineDetail({ id, close }: { id: string; close: () => void }) {
       {edit && (
         <MachineForm entry={e} close={() => setEdit(false)} onDeleted={close} />
       )}
+      {addVariant && (
+        <MachineForm
+          variantOf={e}
+          close={() => setAddVariant(false)}
+          onSaved={(id) => selectMachine(id)}
+        />
+      )}
       {session && (
         <SessionEditor
           id={session}
@@ -1459,17 +1668,79 @@ function MachineDetail({ id, close }: { id: string; close: () => void }) {
     </Modal>
   );
 }
+function MergeExercises({ close }: { close: () => void }) {
+  const { entries, run } = useData();
+  const [source, setSource] = useState("");
+  const [target, setTarget] = useState("");
+  const choices = exerciseCards(entries, entries.filter((e) => e.kind === "machine" && !e.deleted));
+  return (
+    <Modal title="รวมท่า" close={close}>
+      <form className="form" onSubmit={(event) => {
+        event.preventDefault();
+        void run(async () => {
+          await mergeExerciseGroups(source, target);
+          close();
+        }, "รวมท่าแล้ว");
+      }}>
+        <p>เครื่อง รูป และเซ็ตของทั้งสองท่าจะอยู่ในการ์ดชื่อที่เลือกเก็บ</p>
+        {([
+          ["ท่าที่จะรวม", source, setSource],
+          ["ชื่อท่าที่จะเก็บ", target, setTarget],
+        ] as const).map(([label, value, setValue]) => (
+          <Field key={label} label={label}>
+            <select value={value} required onChange={(e) => setValue(e.target.value)}>
+              <option value="">เลือกท่า</option>
+              {choices.map((m) => <option key={m.id} value={exerciseKey(m.data)}>{m.data.name}</option>)}
+            </select>
+          </Field>
+        ))}
+        <button className="primary" disabled={!source || !target || source === target}>ยืนยันรวมท่า</button>
+      </form>
+    </Modal>
+  );
+}
+
+function normalizedExerciseName(value: string) {
+  return value.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{M}\p{N}]+/gu, "");
+}
+
+function similarExerciseName(a: string, b: string) {
+  const x = normalizedExerciseName(a);
+  const y = normalizedExerciseName(b);
+  if (!x || !y) return false;
+  if (x === y) return true;
+  if (Math.min(x.length, y.length) < 4) return false;
+  if (x.includes(y) || y.includes(x)) return true;
+  if (Math.abs(x.length - y.length) > 1) return false;
+  const [short, long] = x.length <= y.length ? [x, y] : [y, x];
+  const mismatch = [...short].findIndex((char, i) => char !== long[i]);
+  return mismatch < 0 ||
+    short.slice(mismatch + (short.length === long.length ? 1 : 0)) === long.slice(mismatch + 1);
+}
+
 function MachineForm({
   entry,
+  variantOf,
   close,
   onDeleted,
+  onSaved,
 }: {
   entry?: Entry;
+  variantOf?: Entry;
   close: () => void;
   onDeleted?: () => void;
+  onSaved?: (id: string) => void;
 }) {
-  const { run } = useData(),
+  const { run, entries } = useData(),
     m = entry?.data as Machine | undefined;
+  const gyms = gymsFor(entries).filter((gym) => !gym.archived || gym.id === m?.gym);
+  const [name, setName] = useState(m?.name ?? variantOf?.data.name ?? "");
+  const [match, setMatch] = useState<Entry | null>(variantOf ?? null);
+  const [distinct, setDistinct] = useState(false);
+  const suggestions = entry ? [] : exerciseCards(entries, entries.filter((e) =>
+    e.kind === "machine" && !e.deleted &&
+    [e.data.name, e.data.thai, ...(e.data.aliases ?? [])].some((alias) => alias && similarExerciseName(name, alias)),
+  )).slice(0, 5);
   return (
     <Modal title={entry ? "แก้ไขเครื่อง" : "เพิ่มเครื่องหรือท่า"} close={close}>
       <form
@@ -1477,15 +1748,20 @@ function MachineForm({
         onSubmit={(e) => {
           e.preventDefault();
           const f = new FormData(e.currentTarget);
+          if (suggestions.length && !match && !distinct) return;
+          const matched = match?.data as Machine | undefined;
           void run(async () => {
-            await save(
+            const saved = await save(
               "machine",
               {
                 ...m,
-                name: f.get("name"),
-                thai: f.get("thai"),
+                name: matched?.name ?? name.trim(),
+                thai: matched?.thai ?? f.get("thai"),
+                exerciseId: matched ? exerciseKey(matched) : m ? exerciseKey(m) : distinct ? uid() : undefined,
+                aliases: matched?.aliases ?? m?.aliases,
+                label: String(f.get("label")).trim(),
                 gym: f.get("gym"),
-                group: f.get("group"),
+                group: matched?.group ?? f.get("group"),
                 setup: f.get("setup"),
                 cues: f.get("cues"),
                 loadMode: f.get("loadMode"),
@@ -1493,22 +1769,25 @@ function MachineForm({
               entry?.id,
             );
             close();
+            onSaved?.(saved.id);
           }, "บันทึกเครื่องแล้ว");
         }}
       >
         <div className="form-grid">
           <Field label="ชื่อท่า / เครื่อง">
-            <input required name="name" defaultValue={m?.name} />
+            <input required name="name" value={name} readOnly={!!variantOf} onChange={(e) => {
+              setName(e.target.value);
+              setMatch(null);
+              setDistinct(false);
+            }} autoComplete="off" />
           </Field>
           <Field label="ชื่อที่เรียกภาษาไทย">
             <input name="thai" defaultValue={m?.thai} />
           </Field>
           <Field label="ฟิตเนส">
-            <select name="gym" defaultValue={m?.gym ?? "WE Fitness"}>
-              <option>WE Fitness</option>
-              <option>Jett</option>
-              <option>ที่บ้าน</option>
-              <option>อื่น ๆ</option>
+            <select name="gym" required defaultValue={m?.gym ?? gyms[0]?.id}>
+              {!gyms.length && <option value="">เพิ่มยิมในหน้าตั้งค่าก่อน</option>}
+              {gyms.map((gym) => <option key={gym.id} value={gym.id}>{gym.name}</option>)}
             </select>
           </Field>
           <Field label="กล้ามเนื้อ">
@@ -1519,6 +1798,25 @@ function MachineForm({
             </select>
           </Field>
         </div>
+        {suggestions.length > 0 && (
+          <div className="notice">
+            <p>ใช่ท่านี้ไหม</p>
+            <div className="chips">
+              {suggestions.map((suggestion) => (
+                <button key={suggestion.id} type="button" aria-pressed={match?.id === suggestion.id}
+                  onClick={() => { setMatch(suggestion); setDistinct(false); }}>
+                  ใช้ท่า {suggestion.data.name}
+                </button>
+              ))}
+              <button type="button" aria-pressed={distinct} onClick={() => { setMatch(null); setDistinct(true); }}>
+                สร้างเป็นท่าใหม่
+              </button>
+            </div>
+          </div>
+        )}
+        <Field label="ป้ายแยกเครื่อง (ถ้ามี)">
+          <input name="label" defaultValue={m?.label} placeholder="เช่น เครื่องสีส้ม" />
+        </Field>
         <Field label="วิธีนับน้ำหนัก">
           <select name="loadMode" defaultValue={m?.loadMode ?? "total"}>
             <option value="total">น้ำหนักรวม / ตามหน้าปัด</option>
@@ -1550,7 +1848,7 @@ function MachineForm({
               ลบเครื่อง
             </button>
           )}
-          <button className="primary">บันทึกเครื่อง</button>
+          <button className="primary" disabled={!!suggestions.length && !match && !distinct}>บันทึกเครื่อง</button>
         </div>
       </form>
     </Modal>
@@ -1560,19 +1858,31 @@ function StartSession({
   close,
   done,
   initial = [],
+  initialTitle,
 }: {
   close: () => void;
   done: (id: string) => void;
   initial?: string[];
+  initialTitle?: string;
 }) {
   const { entries, run, refresh } = useData(),
     [selection, setSelection] = useState(initial),
-    [title, setTitle] = useState(initial.length ? "ฝึกเวท" : "Upper Body"),
+    [title, setTitle] = useState(initialTitle ?? (initial.length ? "ฝึกเวท" : "Upper Body")),
     [date, setDate] = useState(today());
-  const machines = entries.filter(
+  const allMachines = entries.filter(
       (e) => e.kind === "machine" && !e.deleted && !e.data.archived,
-    ),
-    routines = entries.filter((e) => e.kind === "routine" && !e.deleted);
+    );
+  const gyms = gymsFor(entries).filter((gym) => !gym.archived);
+  const [gym, setGym] = useState(() => {
+    const recent = entries.filter((e) => e.kind === "session" && !e.deleted && e.data.status !== "draft")
+      .sort((a, b) => b.data.date.localeCompare(a.data.date) || b.updatedAt.localeCompare(a.updatedAt));
+    return [...allMachines.filter((e) => initial.includes(e.id)).map((e) => e.data.gym),
+      ...recent.flatMap((e) => sessionGyms(entries, e.data))]
+      .find((id) => gyms.some((gym) => gym.id === id)) ?? gyms[0]?.id ?? "";
+  });
+  const machines = allMachines.filter((e) => e.data.gym === gym);
+  const selectedMachines = selection.filter((id) => machines.some((m) => m.id === id));
+  const routines = entries.filter((e) => e.kind === "routine" && !e.deleted);
   return (
     <Modal title="เริ่มฝึก" close={close}>
       <div className="form">
@@ -1587,6 +1897,15 @@ function StartSession({
               onChange={(e) => setDate(e.target.value)}
             />
           </Field>
+          <Field label="ยิมที่ฝึก">
+            <select value={gym} onChange={(e) => {
+              setGym(e.target.value);
+              setSelection([]);
+            }}>
+              {!gyms.length && <option value="">เพิ่มยิมในหน้าตั้งค่าก่อน</option>}
+              {gyms.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </select>
+          </Field>
         </div>
         <div className="chips">
           {["Upper Body", "Lower Body", "Full Body"].map((t) => (
@@ -1598,7 +1917,6 @@ function StartSession({
                   machines
                     .filter(
                       (e) =>
-                        e.data.gym === "WE Fitness" &&
                         (t === "Full Body" ||
                           (t === "Lower Body"
                             ? ["ขา", "แกนกลาง"].includes(e.data.group)
@@ -1646,52 +1964,112 @@ function StartSession({
             <span>
               {e.data.name}
               <small>
-                {e.data.gym} · {e.data.thai}
+                {gymName(entries, e.data.gym)} · {e.data.thai}
               </small>
             </span>
             {selection.includes(e.id) && <b>{selection.indexOf(e.id) + 1}</b>}
           </label>
         ))}
+        <MissingGymMachines key={gym} gym={gym} entries={entries} choose={(picked) =>
+          setSelection((current) => current.includes(picked.id) ? current : [...current, picked.id])
+        } />
         <button
           className="primary wide"
-          disabled={!selection.length || !date || !title}
+          disabled={!selectedMachines.length || !date || !title}
           onClick={() =>
             run(async () => {
               const e = await save(
                 "session",
-                newSession(title, selection, entries, date),
+                newSession(title, selectedMachines, entries, date, gym),
               );
               await refresh();
               done(e.id);
             })
           }
         >
-          เริ่มบันทึก {selection.length} ท่า <ArrowUpRight size={18} />
+          เริ่มบันทึก {selectedMachines.length} ท่า <ArrowUpRight size={18} />
         </button>
       </div>
     </Modal>
   );
 }
-function RestTimer() {
-  const [end, setEnd] = useState<number | null>(null),
-    [seconds, setSeconds] = useState(0);
+const defaultShortcut = "LillyRest";
+
+function launchRestShortcut(name: string, seconds: number) {
+  const params = new URLSearchParams({ name, input: "text", text: String(seconds) });
+  location.href = `shortcuts://run-shortcut?${params}`;
+}
+
+function RestShortcutSettings() {
+  const [enabled, setEnabled] = useState(() => readRestPreference("rest-shortcuts-enabled") === "true");
+  const [name, setName] = useState(() => readRestPreference("rest-shortcut-name") ?? defaultShortcut);
+  return (
+    <section className="panel">
+      <h2>ตัวจับเวลาพักบน iPhone</h2>
+      <label className="check-label">
+        <input type="checkbox" checked={enabled} onChange={(e) => {
+          setEnabled(e.target.checked);
+          writeRestPreference("rest-shortcuts-enabled", String(e.target.checked));
+        }} />
+        ใช้ตัวจับเวลา iPhone (Shortcuts)
+      </label>
+      <Field label="ชื่อคำสั่งลัด">
+        <input value={name} maxLength={80} onChange={(e) => {
+          setName(e.target.value);
+          writeRestPreference("rest-shortcut-name", e.target.value.trim() || defaultShortcut);
+        }} />
+      </Field>
+      <ol>
+        <li>ในแอปคำสั่งลัด สร้างคำสั่งลัดชื่อ {name.trim() || defaultShortcut}</li>
+        <li>เพิ่มการทำงาน “เริ่มตัวจับเวลา” และใช้ “อินพุตคำสั่งลัด” เป็นระยะเวลา หน่วยวินาที</li>
+        <li>กดทดสอบบน iPhone แล้วกลับมาที่ Lilly Training</li>
+      </ol>
+      <button type="button" className="secondary" onClick={() => launchRestShortcut(name.trim() || defaultShortcut, 5)}>
+        ทดสอบ 5 วินาที
+      </button>
+    </section>
+  );
+}
+
+function readRestPreference(name: string) {
+  try { return localStorage.getItem(viewStorageKey(name)); } catch { return null; }
+}
+
+function writeRestPreference(name: string, value: string | null) {
+  try {
+    if (value === null) localStorage.removeItem(viewStorageKey(name));
+    else localStorage.setItem(viewStorageKey(name), value);
+  } catch { /* The in-page timer still works. */ }
+}
+
+function RestTimer({ sessionId }: { sessionId: string }) {
+  const key = `rest:${sessionId}`;
+  const [end, setEnd] = useState(() => Number(readRestPreference(key)) || null);
+  const [now, setNow] = useState(Date.now);
+  const seconds = end === null ? 0 : Math.ceil((end - now) / 1000);
+  const expired = end !== null && end <= now;
+  function updateEnd(value: number | null) {
+    writeRestPreference(key, value === null ? null : String(value));
+    setNow(Date.now());
+    setEnd(value);
+  }
   useEffect(() => {
     if (!end) return;
-    const t = setInterval(() => {
-      const n = Math.max(0, Math.ceil((end - Date.now()) / 1000));
-      setSeconds(n);
-      if (n === 0) {
-        setEnd(null);
-        navigator.vibrate?.([100, 100, 100]);
-      }
-    }, 250);
-    return () => clearInterval(t);
+    const tick = () => setNow(Date.now());
+    const t = setInterval(tick, 250);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", tick);
+    };
   }, [end]);
   return (
-    <div className="rest-timer">
+    <div className="rest-timer" data-state={!end ? "idle" : expired ? "expired" : seconds <= 10 ? "soon" : "running"}>
       <Timer size={17} />
       <span>
-        {end
+        {expired
+          ? `หมดเวลาพัก — เริ่มเซ็ตถัดไป +${Math.floor(Math.abs(seconds) / 60)}:${(Math.abs(seconds) % 60).toString().padStart(2, "0")}`
+          : end
           ? `พัก ${Math.floor(seconds / 60)}:${(seconds % 60).toString().padStart(2, "0")}`
           : "จับเวลาพัก"}
       </span>
@@ -1699,15 +2077,16 @@ function RestTimer() {
         <button
           key={n}
           onClick={() => {
-            setEnd(Date.now() + n * 1000);
-            setSeconds(n);
+            updateEnd(Date.now() + n * 1000);
+            if (readRestPreference("rest-shortcuts-enabled") === "true")
+              launchRestShortcut(readRestPreference("rest-shortcut-name") || defaultShortcut, n);
           }}
         >
           {n}วิ
         </button>
       ))}
       {end && (
-        <button onClick={() => setEnd(null)} aria-label="หยุดเวลา">
+        <button onClick={() => updateEnd(null)} aria-label="ปิดตัวจับเวลา">
           <X size={16} />
         </button>
       )}
@@ -1716,13 +2095,18 @@ function RestTimer() {
 }
 function CardioPage({ openReport = false }: { openReport?: boolean }) {
   const { entries, notify, run } = useData(),
-    [week, setWeek] = useState(weekOf(today())),
+    [storedWeek, setWeek] = useRememberedView("cardio-week", weekOf(today())),
     [date, setDate] = useState(today()),
     [reportWeek, setReportWeek] = useState(weekOf(today())),
     [withWeights, setWithWeights] = useState(true),
     [walking, setWalking] = useState(false),
-    [edit, setEdit] = useState<Entry | null | undefined>(undefined),
+    [editId, setEditId] = useRememberedView("cardio-edit"),
     [copy, setCopy] = useState(openReport);
+  const week = storedWeek ?? weekOf(today());
+  const edit = editId === "new" ? null :
+    entries.find((e) => e.id === editId && e.kind === "cardio" && !e.deleted);
+  const setEdit = (entry: Entry | null | undefined) =>
+    setEditId(entry === undefined ? null : entry?.id ?? "new");
   useEffect(() => setCopy(openReport), [openReport]);
   const pickReportDate = (d: string) => {
     setDate(d);
@@ -1900,6 +2284,7 @@ function CardioPage({ openReport = false }: { openReport?: boolean }) {
       </div>
       {edit !== undefined && (
         <CardioForm
+          key={editId}
           entry={edit ?? undefined}
           close={() => setEdit(undefined)}
         />
@@ -1972,19 +2357,50 @@ function CardioPage({ openReport = false }: { openReport?: boolean }) {
   );
 }
 function CardioForm({ entry, close }: { entry?: Entry; close: () => void }) {
+  const draft = useFormDraft("cardio", entry);
+  const form = useRef<HTMLFormElement>(null);
+  const [revision, setRevision] = useState(0);
   const { entries, run, notify } = useData(),
     c = entry?.data as Cardio | undefined,
-    [date, setDate] = useState(c?.date ?? today()),
-    [week, setWeek] = useState(c?.week ?? weekOf(today())),
-    [time, setTime] = useState(c ? timeInput(c.seconds) : ""),
-    [activity, setActivity] = useState(c?.activity ?? "เดินลู่วิ่ง"),
-    [walkGoal, setWalkGoal] = useState(c?.walkGoal ?? true),
-    [distance, setDistance] = useState(c?.distance?.toString() ?? ""),
-    [photoId, setPhotoId] = useState(c?.photoId),
+    [date, setDate] = useState(draft.initial.date ?? c?.date ?? today()),
+    [weekOverride, setWeekOverride] = useState<string | null>(
+      draft.initial.weekOverride === "auto" ? null :
+        draft.initial.weekOverride ?? (c && c.date && c.week !== weekOf(c.date) ? c.week : null),
+    ),
+    [confirmed, setConfirmed] = useState(draft.initial.verified === undefined ? !c || c.status === "confirmed" : draft.initial.verified === "true"),
+    [time, setTime] = useState(draft.initial.time ?? (c ? timeInput(c.seconds) : "")),
+    [activity, setActivity] = useState(draft.initial.activity ?? c?.activity ?? "เดินลู่วิ่ง"),
+    [walkGoal, setWalkGoal] = useState(draft.initial.walk === undefined ? c?.walkGoal ?? true : draft.initial.walk === "true"),
+    [distance, setDistance] = useState(draft.initial.distance ?? c?.distance?.toString() ?? ""),
+    [photoId, setPhotoId] = useState<string | undefined>(draft.initial.photoId ?? c?.photoId),
     [ocr, setOcr] = useState<Blob | null>(null),
     [saving, setSaving] = useState(false),
     [duplicateId, setDuplicateId] = useState(""),
     [allowDuplicate, setAllowDuplicate] = useState(false);
+  const edited = useRef(false);
+  function persist() {
+    if (!form.current || !edited.current) return;
+    draft.write({
+      ...draft.read(form.current), date, time, activity, distance,
+      verified: String(confirmed), walk: String(walkGoal),
+      weekOverride: weekOverride ?? "auto",
+      ...(photoId && { photoId }),
+    });
+  }
+  useEffect(persist, [date, time, activity, distance, confirmed, walkGoal, weekOverride, photoId]);
+  const actualWeek = date ? weekOf(date) : "";
+  const week = weekOverride ?? actualWeek;
+  const goal = entries.find((e) => e.id === "settings-main" && !e.deleted)?.data.cardioGoal ?? 150;
+  let previewSeconds: number | null = null;
+  if (week && date && weekOf(week) === week) {
+    try {
+      const seconds = parseTime(time);
+      previewSeconds = cardioTotals(entries.filter((e) => e.id !== entry?.id), week).seconds +
+        (confirmed ? seconds : 0);
+    } catch {
+      // An incomplete duration has no preview.
+    }
+  }
   useEffect(() => {
     setDuplicateId("");
     setAllowDuplicate(false);
@@ -1993,6 +2409,7 @@ function CardioForm({ entry, close }: { entry?: Entry; close: () => void }) {
     if (!f) return;
     await run(async () => {
       const id = await addPhoto(f, `หลักฐาน ${date}`);
+      edited.current = true;
       setPhotoId(id);
       setOcr(f);
     });
@@ -2000,7 +2417,10 @@ function CardioForm({ entry, close }: { entry?: Entry; close: () => void }) {
   return (
     <Modal title={entry ? "แก้ไขล็อกคาร์ดิโอ" : "บันทึกคาร์ดิโอ"} close={close}>
       <form
+        ref={form}
+        key={revision}
         className="form"
+        onChange={() => { edited.current = true; persist(); }}
         onSubmit={(e) => {
           e.preventDefault();
           if (saving) return;
@@ -2056,6 +2476,7 @@ function CardioForm({ entry, close }: { entry?: Entry; close: () => void }) {
                 );
               }
               await save("cardio", data, entry?.id);
+              draft.clear();
               close();
               notify("บันทึกคาร์ดิโอแล้ว ยอดและข้อความโค้ชอัปเดตแล้ว");
             } finally {
@@ -2064,6 +2485,24 @@ function CardioForm({ entry, close }: { entry?: Entry; close: () => void }) {
           });
         }}
       >
+        {Object.keys(draft.initial).length > 0 && (
+          <div className="notice">
+            เปิดแบบร่างที่กรอกค้างไว้แล้ว
+            <button type="button" className="text-button" onClick={() => {
+              edited.current = false;
+              draft.discard();
+              setDate(c?.date ?? today());
+              setWeekOverride(c?.date && c.week !== weekOf(c.date) ? c.week : null);
+              setTime(c ? timeInput(c.seconds) : "");
+              setActivity(c?.activity ?? "เดินลู่วิ่ง");
+              setWalkGoal(c?.walkGoal ?? true);
+              setDistance(c?.distance?.toString() ?? "");
+              setConfirmed(!c || c.status === "confirmed");
+              setPhotoId(c?.photoId);
+              setRevision((n) => n + 1);
+            }}>ทิ้งแบบร่าง</button>
+          </div>
+        )}
         <div className="upload-drop">
           <ImagePlus size={26} />
           <h3>เริ่มจากรูปหน้าจอเครื่องได้เลย</h3>
@@ -2115,10 +2554,7 @@ function CardioForm({ entry, close }: { entry?: Entry; close: () => void }) {
               type="date"
               required
               value={date}
-              onChange={(e) => {
-                setDate(e.target.value);
-                if (!c) setWeek(weekOf(e.target.value));
-              }}
+              onChange={(e) => setDate(e.target.value)}
             />
           </Field>
           <Field label="กิจกรรม">
@@ -2165,7 +2601,7 @@ function CardioForm({ entry, close }: { entry?: Entry; close: () => void }) {
               type="number"
               min="0"
               step="0.1"
-              defaultValue={c?.speed ?? ""}
+              defaultValue={draft.initial.speed ?? c?.speed ?? ""}
             />
           </Field>
           <Field label="ความชัน (%)">
@@ -2174,7 +2610,7 @@ function CardioForm({ entry, close }: { entry?: Entry; close: () => void }) {
               type="number"
               min="0"
               step="0.1"
-              defaultValue={c?.incline ?? ""}
+              defaultValue={draft.initial.incline ?? c?.incline ?? ""}
             />
           </Field>
           <Field label="พลังงานตามเครื่อง (kcal)">
@@ -2183,7 +2619,7 @@ function CardioForm({ entry, close }: { entry?: Entry; close: () => void }) {
               type="number"
               min="0"
               step="1"
-              defaultValue={c?.kcal ?? ""}
+              defaultValue={draft.initial.kcal ?? c?.kcal ?? ""}
             />
           </Field>
           <Field label="นับให้รอบเริ่มวันอาทิตย์">
@@ -2191,15 +2627,24 @@ function CardioForm({ entry, close }: { entry?: Entry; close: () => void }) {
               type="date"
               required
               value={week}
-              onChange={(e) => setWeek(e.target.value)}
+              onChange={(e) => setWeekOverride(e.target.value === actualWeek ? null : e.target.value)}
             />
           </Field>
         </div>
-        {week !== weekOf(date) && (
+        {date && week && week !== actualWeek && (
           <div className="notice">
-            รายการวันที่ {dateLabel(date)} จะนับชดเชยให้รอบ {dateLabel(week)} –{" "}
+            ชดเชยให้รอบ {dateLabel(week)} –{" "}
             {dateLabel(addDays(week, 6))}
+            <button type="button" className="text-button" onClick={() => setWeekOverride(null)}>
+              ใช้รอบตามวันที่จริง
+            </button>
           </div>
+        )}
+        {previewSeconds !== null && (
+          <p className="muted" aria-live="polite">
+            ยอดรอบนี้หลังบันทึก {minuteDuration(previewSeconds)} / {goal} นาที
+            {!confirmed && " · รายการรอตรวจไม่นับยอด"}
+          </p>
         )}
         <label className="check-label">
           <input
@@ -2213,7 +2658,7 @@ function CardioForm({ entry, close }: { entry?: Entry; close: () => void }) {
         <Field label="หมายเหตุ / ที่มาหรือข้อจำกัด">
           <textarea
             name="note"
-            defaultValue={c?.note}
+            defaultValue={draft.initial.note ?? c?.note}
             placeholder="เช่น ชดเชยสัปดาห์ก่อน / ปรับความเร็วระหว่างเดิน"
           />
         </Field>
@@ -2221,7 +2666,8 @@ function CardioForm({ entry, close }: { entry?: Entry; close: () => void }) {
           <input
             name="confirmed"
             type="checkbox"
-            defaultChecked={c ? c.status === "confirmed" : true}
+            checked={confirmed}
+            onChange={(e) => setConfirmed(e.target.checked)}
           />
           ตรวจข้อมูลแล้ว ยืนยันให้นับยอด
         </label>
@@ -2446,6 +2892,33 @@ function OCRModal({
     </Modal>
   );
 }
+function useFormDraft(kind: "body" | "cardio", entry?: Entry) {
+  const owner = config() ? localStorage.getItem("lilly-owner") ?? "owner" : "local";
+  const key = `lilly-form:${config()?.url ?? "local"}:${owner}:${kind}:${entry?.id ?? "new"}`;
+  const [initial, setInitial] = useState<Record<string, string>>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(key) ?? "null");
+      return saved?.version === (entry?.updatedAt ?? "") ? saved.fields : {};
+    } catch {
+      return {};
+    }
+  });
+  function clear() {
+    try { localStorage.removeItem(key); } catch { /* Storage is optional. */ }
+  }
+  function write(fields: Record<string, string>) {
+    try {
+      localStorage.setItem(key, JSON.stringify({ version: entry?.updatedAt ?? "", fields }));
+    } catch { /* The form remains usable if storage is unavailable. */ }
+  }
+  function read(form: HTMLFormElement) {
+    return Object.fromEntries(Array.from(new FormData(form), ([name, value]) =>
+      [name, typeof value === "string" ? value : ""] as const,
+    ));
+  }
+  return { initial, write, read, clear, discard: () => { clear(); setInitial({}); } };
+}
+
 export function BodyForm({
   entry,
   close,
@@ -2453,12 +2926,16 @@ export function BodyForm({
   entry?: Entry;
   close: () => void;
 }) {
-  const { run } = useData(),
-    [photoId, setPhotoId] = useState<string | undefined>(entry?.data.photoId);
+  const { run } = useData();
+  const draft = useFormDraft("body", entry);
+  const [revision, setRevision] = useState(0);
+  const [photoId, setPhotoId] = useState<string | undefined>(draft.initial.photoId ?? entry?.data.photoId);
   return (
     <Modal title="บันทึกผลวัดร่างกาย" close={close}>
       <form
+        key={revision}
         className="form"
+        onChange={(e) => draft.write({ ...draft.read(e.currentTarget), ...(photoId && { photoId }) })}
         onSubmit={(e) => {
           e.preventDefault();
           const f = new FormData(e.currentTarget);
@@ -2479,16 +2956,27 @@ export function BodyForm({
             )
               throw Error("กรอกผลวัดอย่างน้อยหนึ่งค่า");
             await save("body", data, entry?.id);
+            draft.clear();
             close();
           }, "บันทึกผลวัดแล้ว");
         }}
       >
+        {Object.keys(draft.initial).length > 0 && (
+          <div className="notice">
+            เปิดแบบร่างที่กรอกค้างไว้แล้ว
+            <button type="button" className="text-button" onClick={() => {
+              draft.discard();
+              setPhotoId(entry?.data.photoId);
+              setRevision((value) => value + 1);
+            }}>ทิ้งแบบร่าง</button>
+          </div>
+        )}
         <Field label="วันที่วัด">
           <input
             name="date"
             type="date"
             required
-            defaultValue={entry?.data.date ?? today()}
+            defaultValue={draft.initial.date ?? entry?.data.date ?? today()}
           />
         </Field>
         <div className="form-grid">
@@ -2505,7 +2993,7 @@ export function BodyForm({
                 min="0.1"
                 max={k === "fat" ? 100 : 400}
                 step="0.1"
-                defaultValue={entry?.data[k] ?? ""}
+                defaultValue={draft.initial[k] ?? entry?.data[k] ?? ""}
               />
             </Field>
           ))}
@@ -2513,7 +3001,7 @@ export function BodyForm({
         <Field label="วิธีวัด / หมายเหตุ">
           <textarea
             name="note"
-            defaultValue={entry?.data.note}
+            defaultValue={draft.initial.note ?? entry?.data.note}
             placeholder="เช่น InBody / ก่อนอาหารเช้า"
           />
         </Field>
@@ -2526,10 +3014,12 @@ export function BodyForm({
             accept="image/*"
             onChange={(e) => {
               const f = e.target.files?.[0];
-              if (f)
-                void run(async () =>
-                  setPhotoId(await addPhoto(f, "ผลวัดร่างกาย")),
-                );
+              const form = e.currentTarget.form;
+              if (f && form) void run(async () => {
+                const id = await addPhoto(f, "ผลวัดร่างกาย");
+                setPhotoId(id);
+                draft.write({ ...draft.read(form), photoId: id });
+              });
             }}
           />
         </label>
@@ -2548,27 +3038,24 @@ function HistoryPage() {
     [selected, setSelected] = useState<Entry | null>(null),
     [filter, setFilter] = useState("all"),
     [gym, setGym] = useState("");
-  const gymsOf = (e: Entry) =>
-    new Set<string>(
-      e.kind === "session"
-        ? (e.data as Session).exercises
-            .map((x) => entries.find((m) => m.id === x.machineId)?.data.gym)
-            .filter(Boolean)
-        : [],
-    );
-  const machineNames = (e: Entry) =>
-    (e.data as Session).exercises
-      .filter((x) => x.sets.some((a) => a.done))
-      .map((x) => entries.find((m) => m.id === x.machineId)?.data.name)
-      .filter(Boolean)
-      .join(" · ");
+  const sessionSummary = (session: Session) => {
+    const sets = session.exercises.flatMap((exercise) => {
+      const done = exercise.sets.filter((set) => set.done);
+      if (!done.length) return [];
+      const name = entries.find((e) => e.id === exercise.machineId)?.data.name ?? exercise.originalName;
+      const result = done.map((set) => formatSet(set, exercise.loadMode)).join(" / ");
+      return [name && session.exercises.length > 1 ? `${name}: ${result}` : result];
+    });
+    return [...sessionGyms(entries, session).map((id) => gymName(entries, id)), ...(sets.length ? sets : [session.summary])]
+      .filter(Boolean).join(" · ");
+  };
   const rows = entries
     .filter(
       (e) =>
         !e.deleted &&
         ["session", "cardio", "body"].includes(e.kind) &&
         (filter === "all" || e.kind === filter) &&
-        (!gym || (e.kind === "session" && gymsOf(e).has(gym))),
+        (!gym || (e.kind === "session" && sessionGyms(entries, e.data).includes(gym))),
     )
     .sort((a, b) => (b.data.date || "").localeCompare(a.data.date || ""));
   return (
@@ -2597,8 +3084,7 @@ function HistoryPage() {
         <div className="chips">
           {[
             ["", "ทุกฟิตเนส"],
-            ["WE Fitness", "WE Fitness"],
-            ["Jett", "Jett"],
+            ...gymsFor(entries).map(({ id, name }) => [id, name]),
           ].map(([k, l]) => (
             <button
               className={gym === k ? "selected" : ""}
@@ -2638,9 +3124,9 @@ function HistoryPage() {
               </small>
               <small>
                 {e.kind === "session"
-                  ? machineNames(e) || e.data.source || e.data.note
+                  ? sessionSummary(e.data)
                   : e.kind === "cardio"
-                    ? `${minuteDuration(e.data.seconds)}${e.data.distance !== null ? ` · ${e.data.distance} กม.` : ""}`
+                    ? cardioSummary(e.data)
                     : [
                         e.data.waist !== null && `เอว ${e.data.waist} ซม.`,
                         e.data.fat !== null && `ไขมัน ${e.data.fat}%`,
@@ -2787,6 +3273,98 @@ function ArchiveItem({ e }: { e: Entry }) {
     </details>
   );
 }
+function GymSettings() {
+  const { entries, run } = useData();
+  const gyms = gymsFor(entries);
+  const [editing, setEditing] = useState<Gym | null>(null);
+  const editNew = () => setEditing({ id: uid(), name: "", shortCode: "", archived: false });
+  return (
+    <section className="panel">
+      <div className="section-title">
+        <h2>ยิมของคุณ</h2>
+        <button className="secondary" onClick={editNew}>เพิ่มยิม</button>
+      </div>
+      {gyms.map((gym) => (
+        <button className="select-row" key={gym.id} onClick={() => setEditing(gym)}>
+          {gym.name}{gym.shortCode ? ` · ${gym.shortCode}` : ""}
+          {gym.archived && " · เก็บเข้าคลังแล้ว"}
+        </button>
+      ))}
+      {editing && (
+        <Modal title="รายละเอียดสถานที่ฝึก" close={() => setEditing(null)}>
+          <form className="form" onSubmit={(event) => {
+            event.preventDefault();
+            const form = new FormData(event.currentTarget);
+            const updated = {
+              ...editing,
+              name: String(form.get("name")).trim(),
+              shortCode: String(form.get("shortCode")).trim(),
+              archived: form.has("archived"),
+            };
+            void run(async () => {
+              const latest = gymsFor(await allEntries());
+              await save("settings", {
+                gyms: [...latest.filter((gym) => gym.id !== updated.id), updated],
+              }, gymCatalogId);
+              setEditing(null);
+            }, "บันทึกยิมแล้ว");
+          }}>
+            <Field label="ชื่อยิม"><input name="name" required maxLength={80} defaultValue={editing.name} /></Field>
+            <Field label="ตัวย่อ"><input name="shortCode" maxLength={8} defaultValue={editing.shortCode} /></Field>
+            <label className="check-label">
+              <input name="archived" type="checkbox" defaultChecked={editing.archived} />
+              เก็บเข้าคลัง
+            </label>
+            <button className="primary">บันทึกยิม</button>
+          </form>
+        </Modal>
+      )}
+    </section>
+  );
+}
+
+function ReviewedSessionMigration() {
+  const { entries, run } = useData();
+  const [review, setReview] = useState<{ expected: Entry; gym: string; moves: MachineMove[] } | null>(null);
+  const [applying, setApplying] = useState(false);
+  return (
+    <details className="panel">
+      <summary>ย้ายครั้งฝึกไปเครื่องที่ตรวจแล้ว</summary>
+      <label className="secondary">
+        เปิดไฟล์รายการย้าย
+        <input hidden type="file" accept=".json,application/json" onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = "";
+          if (!file) return;
+          setReview(null);
+          void run(async () => {
+            const data = JSON.parse(await file.text());
+            const current = entries.find((e) => e.id === data.expected?.id);
+            if (!current || current.version !== data.expected.version ||
+              JSON.stringify(current.data) !== JSON.stringify(data.expected.data))
+              throw Error("ไฟล์รายการย้ายไม่ตรงกับครั้งฝึกล่าสุด");
+            planSessionMove(entries, current.id, data.gym, data.moves);
+            setReview({ expected: current, gym: data.gym, moves: data.moves });
+          });
+        }} />
+      </label>
+      {review && (
+        <div className="notice">
+          <p>{dateLabel(review.expected.data.date)} · {gymName(entries, review.gym)}</p>
+          <ul>{review.moves.map((move) => <li key={move.from}>{move.machine.name}</li>)}</ul>
+          <button className="primary" disabled={applying} onClick={() => {
+            setApplying(true);
+            void run(async () => {
+              await moveReviewedSession(review.expected, review.gym, review.moves);
+              setReview(null);
+            }, "ย้ายครั้งฝึกแล้ว").finally(() => setApplying(false));
+          }}>ยืนยันย้ายครั้งฝึก</button>
+        </div>
+      )}
+    </details>
+  );
+}
+
 function SettingsPage({
   synchronize,
   busy,
@@ -2886,6 +3464,9 @@ function SettingsPage({
         </p>
       </section>
       <RoutineSettings />
+      <GymSettings />
+      <ReviewedSessionMigration />
+      <RestShortcutSettings />
       <section className="panel">
         <h2>เป้าหมายรายสัปดาห์</h2>
         <form
@@ -3188,6 +3769,7 @@ function SessionEditor({
 const emptySet = (prev?: SetLog): SetLog => ({
   id: uid(),
   load: prev?.load ?? null,
+  enteredAs: prev?.enteredAs,
   ...(prev?.loadText !== undefined && prev.load === null
     ? { loadText: prev.loadText }
     : {}),
@@ -3214,8 +3796,9 @@ function SessionEditorForm({
     [addMachine, setAddMachine] = useState(false),
     [confirmDelete, setConfirmDelete] = useState(false),
     [focus, setFocus] = useState<number | null>(() => {
+      const machine = focusMachine ?? (source.data.status === "draft" ? readView(`focus:${id}`) : null);
       const i = (source.data as Session).exercises.findIndex(
-        (x) => x.machineId === focusMachine,
+        (x) => x.machineId === machine,
       );
       return i >= 0 ? i : null;
     });
@@ -3223,6 +3806,7 @@ function SessionEditorForm({
   latest.current = s;
   const savedText = useRef(JSON.stringify(source.data));
   const writeQueue = useRef(Promise.resolve());
+  const finishing = useRef(false);
   const scroller = useRef<HTMLDivElement>(null);
   const saveDraft = (next: Session) => {
     const snapshot = structuredClone(next);
@@ -3239,7 +3823,7 @@ function SessionEditorForm({
   useEffect(() => {
     if (JSON.stringify(s) === savedText.current) return;
     const timeout = setTimeout(() => {
-      void run(() => saveDraft(s));
+      if (!finishing.current) void run(() => saveDraft(s));
     }, 500);
     return () => clearTimeout(timeout);
   }, [s]);
@@ -3248,12 +3832,24 @@ function SessionEditorForm({
       if (JSON.stringify(latest.current) !== savedText.current)
         e.preventDefault();
     };
+    const flush = () => {
+      if (!finishing.current && JSON.stringify(latest.current) !== savedText.current)
+        void run(() => saveDraft(latest.current));
+    };
+    const visibility = () => { if (document.hidden) flush(); };
     window.addEventListener("beforeunload", prevent);
-    return () => window.removeEventListener("beforeunload", prevent);
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", visibility);
+    return () => {
+      window.removeEventListener("beforeunload", prevent);
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", visibility);
+    };
   }, []);
   useEffect(() => {
     const modal = scroller.current?.closest<HTMLElement>(".modal");
     if (modal) modal.scrollTop = 0;
+    if (s.status === "draft") writeView(`focus:${id}`, focus === null ? null : s.exercises[focus]?.machineId ?? null);
   }, [focus]);
   const update = (i: number, x: ExerciseLog) =>
     setS((v) => ({
@@ -3276,6 +3872,7 @@ function SessionEditorForm({
     x.sets.some((a) => a.done),
   ).length;
   async function finish() {
+    if (finishing.current) return;
     if (!s.date) {
       notify("เลือกวันที่ฝึก");
       return;
@@ -3302,6 +3899,7 @@ function SessionEditorForm({
       notify("ยืนยันอย่างน้อยหนึ่งเซตก่อนจบ");
       return;
     }
+    finishing.current = true;
     setSaving(true);
     await run(
       async () => {
@@ -3309,10 +3907,12 @@ function SessionEditorForm({
           ...s,
           status: s.status === "draft" ? "completed" : s.status,
         });
+        writeView(`focus:${id}`, null);
         close();
       },
       s.status === "draft" ? "บันทึกการฝึกแล้ว" : "บันทึกการแก้ไขแล้ว",
     );
+    finishing.current = false;
     setSaving(false);
   }
   const keep = () =>
@@ -3374,6 +3974,7 @@ function SessionEditorForm({
               </div>
             )}
             {s.summary && <div className="notice preserve">{s.summary}</div>}
+            {s.source && <p className="muted">{s.source}</p>}
             <div className="exercise-list">
               {s.exercises.map((x, i) => {
                 const m = entries.find((e) => e.id === x.machineId)?.data as
@@ -3524,12 +4125,13 @@ function SessionEditorForm({
         )}
         {addMachine && (
           <MachinePicker
+            gym={s.gym}
             excluded={s.exercises.map((x) => x.machineId)}
             close={() => setAddMachine(false)}
             choose={(picked) => {
               setS((v) => ({
                 ...v,
-                exercises: [...v.exercises, exerciseFor(picked)],
+                exercises: [...v.exercises, exerciseFor(picked, entries, v.date, id)],
               }));
               setAddMachine(false);
             }}
@@ -3561,6 +4163,9 @@ function ExerciseFocus({
   go: (n: number) => void;
 }) {
   const { entries, notify } = useData();
+  const [inputMode, setInputMode] = useState<"total" | "perSide">(
+    x.loadMode === "per-side" ? "perSide" : "total",
+  );
   const m = entries.find((e) => e.id === x.machineId)?.data as
     Machine | undefined;
   const last = latestExercise(entries, x.machineId, date || today(), sessionId),
@@ -3569,8 +4174,18 @@ function ExerciseFocus({
       x.machineId,
     ),
     textLoad = isTextLoad(x);
-  const unit =
-    x.loadMode === "bodyweight" ? "" : textLoad ? "" : loadLabel(x.loadMode);
+  const configurableLoad = x.loadMode === "total" || x.loadMode === "per-side";
+  const divisor = configurableLoad && inputMode === "perSide" ? 2 : 1;
+  const unit = configurableLoad ? (divisor === 2 ? "กก./ข้าง" : "กก.") : loadLabel(x.loadMode);
+  const reference = !last && m
+    ? machineVariants(entries, m)
+        .filter((variant) => variant.data.gym !== m.gym)
+        .flatMap((variant) => {
+          const result = latestExercise(entries, variant.id, date || today(), sessionId);
+          return result ? [{ gym: gymName(entries, variant.data.gym), result }] : [];
+        })
+        .sort((a, b) => b.result.entry.data.date.localeCompare(a.result.entry.data.date))[0]
+    : undefined;
   return (
     <>
       <div className="focus-nav">
@@ -3593,7 +4208,7 @@ function ExerciseFocus({
       </div>
       <div className="focus-title">
         <small>
-          {m?.gym} · {m?.group} · {loadLabel(x.loadMode)}
+          {m && gymName(entries, m.gym)} · {m?.group} · {loadLabel(x.loadMode)}
         </small>
         <h3>{m?.name ?? "ไม่ทราบเครื่อง"}</h3>
         {m?.thai && <p className="muted">{m.thai}</p>}
@@ -3655,7 +4270,22 @@ function ExerciseFocus({
           ผลที่รายงาน · ไม่ทราบจำนวนเซตจริง แถวนี้ไม่ใช่จำนวนเซตที่เล่น
         </div>
       )}
-      <RestTimer />
+      {reference && (
+        <p className="muted">
+          อ้างอิง: {reference.gym} · {reference.result.exercise!.sets.filter((set) => set.done)
+            .map((set) => formatSet(set, reference.result.exercise!.loadMode)).join(" / ")}
+          {" "} (คนละเครื่อง น้ำหนักอาจไม่เท่ากัน)
+        </p>
+      )}
+      <RestTimer key={sessionId} sessionId={sessionId} />
+      {configurableLoad && !textLoad && (
+        <Field label="หน่วยที่กรอก">
+          <select value={inputMode} onChange={(e) => setInputMode(e.target.value === "perSide" ? "perSide" : "total")}>
+            <option value="total">น้ำหนักรวม</option>
+            <option value="perSide">น้ำหนักข้างละ</option>
+          </select>
+        </Field>
+      )}
       <div className="set-table">
         <div className="set-head">
           <span>เซต</span>
@@ -3683,11 +4313,12 @@ function ExerciseFocus({
                 min="0"
                 step="0.1"
                 placeholder={x.loadMode === "bodyweight" ? "ตัว" : "–"}
-                value={a.load ?? ""}
+                value={a.load === null ? "" : totalLoad(a, x.loadMode)! / divisor}
                 disabled={x.loadMode === "bodyweight"}
                 onChange={(e) =>
                   patchSet(j, {
-                    load: e.target.value === "" ? null : Number(e.target.value),
+                    load: e.target.value === "" ? null : Number(e.target.value) * divisor,
+                    enteredAs: configurableLoad ? inputMode : undefined,
                   })
                 }
               />
@@ -3757,19 +4388,22 @@ function ExerciseFocus({
                 ...x,
                 sets: x.sets.map((a) => {
                   if (textLoad) {
+                    if (a.load !== null) return a;
                     const n = Number(
                       a.loadText?.replace(/กก\.?|kg/gi, "").trim(),
                     );
+                    if (a.loadText?.trim() && !Number.isFinite(n)) return a;
                     const { loadText: _drop, ...rest } = a;
                     return {
                       ...rest,
-                      load: a.loadText?.trim() && Number.isFinite(n) ? n : null,
+                      load: a.loadText?.trim() && Number.isFinite(n) ? n * divisor : null,
+                      enteredAs: configurableLoad ? inputMode : undefined,
                     };
                   }
                   return {
                     ...a,
                     loadText:
-                      a.load !== null ? `${a.load} กก.` : (a.loadText ?? ""),
+                      a.load !== null ? `${totalLoad(a, x.loadMode)! / divisor} กก.` : (a.loadText ?? ""),
                     load: null,
                   };
                 }),
