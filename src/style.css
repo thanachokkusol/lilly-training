@@ -931,6 +931,7 @@ footer span {
   margin: 0;
 }
 .detail-photo {
+  touch-action: pan-y;
   height: 330px;
   background: #e9ebe2;
 }

@@ -5,7 +5,7 @@ export const exerciseKey = (machine: Machine) =>
 
 export function machinePhotoIds(entries: Entry[], machineId: string, machine: Machine) {
   const jettPhotos = new Set(entries.flatMap((e) =>
-    e.kind === "machine" && e.data.gym === "Jett" && e.data.photoId ? [e.data.photoId] : [],
+    e.kind === "machine" && !e.deleted && e.data.gym === "Jett" && e.data.photoId ? [e.data.photoId] : [],
   ));
   const belongs = (id: string) =>
     machine.gym === "Jett" || (!id.startsWith("photo-jett-") && !jettPhotos.has(id));

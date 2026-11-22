@@ -60,9 +60,10 @@ it("keeps both seed and added photos when changing the main photo and recovers a
   );
   let dialog = await topDialog();
   expect(
-    dialog.getAllByRole("button", { name: /^(รูปหลัก|ตั้งเป็นรูปหลัก)$/ }),
+    dialog.getAllByRole("button", { name: /^(รูปหลัก|เปิดรูปเครื่อง)$/ }),
   ).toHaveLength(2);
-  fireEvent.click(dialog.getByRole("button", { name: "ตั้งเป็นรูปหลัก" }));
+  fireEvent.click(dialog.getByRole("button", { name: "เปิดรูปเครื่อง" }));
+  fireEvent.click(dialog.getByRole("button", { name: "ใช้รูปที่เปิดเป็นรูปหลัก" }));
   await waitFor(async () =>
     expect((await allEntries()).find((e) => e.id === id)?.data.photoId).toBe(
       secondId,
@@ -73,7 +74,7 @@ it("keeps both seed and added photos when changing the main photo and recovers a
   ).toBe(id);
   dialog = await topDialog();
   expect(
-    dialog.getAllByRole("button", { name: /^(รูปหลัก|ตั้งเป็นรูปหลัก)$/ }),
+    dialog.getAllByRole("button", { name: /^(รูปหลัก|เปิดรูปเครื่อง)$/ }),
   ).toHaveLength(2);
   expect(dialog.getAllByRole("button", { name: "รูปหลัก" })).toHaveLength(1);
   cleanup();
@@ -89,7 +90,7 @@ it("keeps both seed and added photos when changing the main photo and recovers a
   );
   dialog = await topDialog();
   expect(
-    dialog.getAllByRole("button", { name: /^(รูปหลัก|ตั้งเป็นรูปหลัก)$/ }),
+    dialog.getAllByRole("button", { name: /^(รูปหลัก|เปิดรูปเครื่อง)$/ }),
   ).toHaveLength(2);
 });
 it("shows remaining time until the full 150-minute goal is reached", async () => {

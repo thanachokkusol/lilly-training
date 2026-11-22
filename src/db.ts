@@ -26,6 +26,26 @@ export async function getEntry(id: string): Promise<Entry | undefined> {
 export async function putEntry(e: Entry) {
   await (await db).put("entries", e);
 }
+export async function moveMachinePhoto(photoId: string, from: string, to: string) {
+  if (from === to) return;
+  const tx = (await db).transaction("entries", "readwrite");
+  const [photo, source, target] = await Promise.all([photoId, from, to].map((id) => tx.store.get(id) as Promise<Entry | undefined>));
+  if (!photo || photo.kind !== "photo" || photo.data.machineId !== from ||
+      !source || source.kind !== "machine" || !target || target.kind !== "machine" ||
+      [photo, source, target].some((e) => e.deleted || e.conflict))
+    throw Error("รูปหรือเครื่องเปลี่ยนแล้ว กรุณาเปิดข้อมูลล่าสุด");
+  const updatedAt = new Date().toISOString();
+  await Promise.all([
+    tx.store.put({ ...photo, updatedAt, dirty: true, data: { ...photo.data, machineId: to, label: target.data.name } }),
+    tx.store.put({ ...source, updatedAt, dirty: true, data: {
+      ...source.data,
+      photoId: source.data.photoId === photoId ? undefined : source.data.photoId,
+      referencePhotoId: source.data.referencePhotoId === photoId ? undefined : source.data.referencePhotoId,
+    } }),
+    tx.store.put({ ...target, updatedAt, dirty: true, data: { ...target.data, photoId } }),
+    tx.done,
+  ]);
+}
 export async function mergeExerciseGroups(sourceKey: string, targetKey: string) {
   if (sourceKey === targetKey) throw Error("เลือกท่าที่ต่างกัน");
   const tx = (await db).transaction("entries", "readwrite");

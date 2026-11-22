@@ -61,6 +61,7 @@ import {
   download,
   mergeExerciseGroups,
   moveReviewedSession,
+  moveMachinePhoto,
 } from "./db";
 import {
   today,
@@ -1300,11 +1301,13 @@ function MachineTile({ e, onClick }: { e: Entry; onClick: () => void }) {
   const { entries } = useData(),
     m = e.data as Machine,
     last = latestExercise(entries, e.id, today());
+  const preferred = machineVariants(entries, m).find((x) => x.data.gym === "WE Fitness" && machinePhotoIds(entries, x.id, x.data).main);
+  const cover = preferred ?? e;
   return (
     <button className="machine-tile" onClick={onClick}>
       <div className="machine-photo">
-        <Photo id={machinePhotoIds(entries, e.id, m).main} alt={m.name} />
-        <span className="gym-label">{gymsFor(entries).find((gym) => gym.id === m.gym)?.shortCode || gymName(entries, m.gym)}</span>
+        <Photo id={machinePhotoIds(entries, cover.id, cover.data).main} alt={m.name} />
+        <span className="gym-label">{gymName(entries, cover.data.gym)}</span>
       </div>
       <div className="machine-copy">
         <small>{m.group}</small>
@@ -1316,7 +1319,7 @@ function MachineTile({ e, onClick }: { e: Entry; onClick: () => void }) {
         <div className="last-load">
           {last ? (
             <>
-              <span>ครั้งล่าสุด</span>
+              <span>ครั้งล่าสุด · {gymName(entries, m.gym)}</span>
               <strong>
                 {last
                   .exercise!.sets.filter((s) => s.done)
@@ -1425,9 +1428,13 @@ function MachineDetail({ id, close, selectMachine }: {
     e = entries.find((e) => e.id === id),
     [edit, setEdit] = useState(false),
     [addVariant, setAddVariant] = useState(false),
+    [previewId, setPreviewId] = useState<string | null>(null),
+    [photoTarget, setPhotoTarget] = useState(""),
+    [confirmPhotoTrash, setConfirmPhotoTrash] = useState(false),
     [beginBusy, setBeginBusy] = useState(false),
     [showAll, setShowAll] = useState(false),
     [session, setSession] = useState<string | null>(null);
+  const touchStart = useRef<number | null>(null);
   if (!e) return null;
   const m = e.data as Machine;
   const history = machineHistory(entries, id),
@@ -1444,6 +1451,9 @@ function MachineDetail({ id, close, selectMachine }: {
       )
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
   const { photos, main: mainPhoto } = machinePhotoIds(entries, id, m);
+  const shown = photos.find((p) => p.id === previewId)?.id ?? mainPhoto;
+  const photoIndex = photos.findIndex((p) => p.id === shown);
+  const photoTargets = entries.filter((item) => item.kind === "machine" && !item.deleted && !item.data.archived && item.id !== id);
   async function setMainPhoto(photoId: string) {
     const old = entries.find(
       (p) =>
@@ -1505,9 +1515,25 @@ function MachineDetail({ id, close, selectMachine }: {
         ))}
         <button onClick={() => setAddVariant(true)}>เพิ่มเครื่องของท่านี้</button>
       </div>
-      <div className="detail-photo">
-        <Photo id={mainPhoto} alt={m.name} />
+      <div className="detail-photo"
+        onTouchStart={(event) => { touchStart.current = event.touches[0]?.clientX ?? null; }}
+        onTouchEnd={(event) => {
+          const start = touchStart.current;
+          touchStart.current = null;
+          const end = event.changedTouches[0]?.clientX;
+          if (start === null || end === undefined || Math.abs(end - start) < 40) return;
+          const next = photos[photoIndex + (end < start ? 1 : -1)];
+          if (next) setPreviewId(next.id);
+        }}>
+        <Photo id={shown} alt={m.name} />
       </div>
+      {photos.length > 1 && (
+        <div className="upload-row">
+          <button disabled={photoIndex <= 0} onClick={() => setPreviewId(photos[photoIndex - 1].id)}>รูปก่อนหน้า</button>
+          <span>{photoIndex + 1} / {photos.length}</span>
+          <button disabled={photoIndex >= photos.length - 1} onClick={() => setPreviewId(photos[photoIndex + 1].id)}>รูปถัดไป</button>
+        </div>
+      )}
       <div className="detail-body">
         <div className="focus-title">
           <small>
@@ -1568,11 +1594,9 @@ function MachineDetail({ id, close, selectMachine }: {
               <button
                 key={p.id}
                 className={p.id === mainPhoto ? "main" : ""}
-                aria-label={p.id === mainPhoto ? "รูปหลัก" : "ตั้งเป็นรูปหลัก"}
-                onClick={() =>
-                  p.id !== mainPhoto &&
-                  run(() => setMainPhoto(p.id), "ตั้งรูปหลักแล้ว")
-                }
+                aria-label={p.id === mainPhoto ? "รูปหลัก" : "เปิดรูปเครื่อง"}
+                aria-pressed={p.id === shown}
+                onClick={() => setPreviewId(p.id)}
               >
                 <Photo id={p.id} alt={p.data.label} />
                 {p.id === mainPhoto && <span>รูปหลัก</span>}
@@ -1606,7 +1630,26 @@ function MachineDetail({ id, close, selectMachine }: {
               />
             </label>
           </div>
-          {photos.length > 1 && <p className="muted">แตะรูปเพื่อตั้งเป็นรูปหลัก</p>}
+          {shown && photoIndex >= 0 && (
+            <div className="upload-row">
+              {shown !== mainPhoto && <button className="secondary" onClick={() =>
+                run(() => setMainPhoto(shown), "ตั้งรูปหลักแล้ว")}>ใช้รูปที่เปิดเป็นรูปหลัก</button>}
+              <button className="text-button" onClick={() => setConfirmPhotoTrash(true)}>ลบรูปที่เปิด</button>
+              {photos[photoIndex].data.machineId === id && !shown.startsWith("photo-") && (
+                <>
+                  <select aria-label="เครื่องปลายทางของรูป" value={photoTarget} onChange={(event) => setPhotoTarget(event.target.value)}>
+                    <option value="">เลือกเครื่องที่จะย้ายรูปไป</option>
+                    {photoTargets.map((item) => <option key={item.id} value={item.id}>{gymName(entries, item.data.gym)} · {item.data.name}{item.data.label ? ` · ${item.data.label}` : ""}</option>)}
+                  </select>
+                  <button className="secondary" disabled={!photoTarget} onClick={() => run(async () => {
+                    await moveMachinePhoto(shown, id, photoTarget);
+                    setPreviewId(null);
+                    setPhotoTarget("");
+                  }, "ย้ายรูปเครื่องแล้ว")}>ย้ายรูปที่เปิด</button>
+                </>
+              )}
+            </div>
+          )}
         </div>
         <div>
           <h4>ประวัติเครื่องนี้ ({history.length})</h4>
@@ -1674,6 +1717,18 @@ function MachineDetail({ id, close, selectMachine }: {
       </div>
       {edit && (
         <MachineForm entry={e} close={() => setEdit(false)} onDeleted={close} />
+      )}
+      {confirmPhotoTrash && shown && (
+        <Modal title="ลบรูปเครื่อง" close={() => setConfirmPhotoTrash(false)}>
+          <div className="form">
+            <p>รูปจะถูกย้ายเข้าถังขยะและกู้คืนได้ในหน้าตั้งค่า</p>
+            <button className="danger" onClick={() => run(async () => {
+              await trash(shown);
+              setConfirmPhotoTrash(false);
+              setPreviewId(null);
+            }, "ย้ายรูปเข้าถังขยะแล้ว")}>ยืนยันลบรูป</button>
+          </div>
+        </Modal>
       )}
       {addVariant && (
         <MachineForm
