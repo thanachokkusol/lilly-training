@@ -725,6 +725,7 @@ const cardioSummary = (cardio: Cardio) =>
 function Today({ nav }: { nav: (p: string) => void }) {
   const { entries, run, refresh } = useData(),
     [start, setStart] = useState(false),
+    [discardDraft, setDiscardDraft] = useState<string | null>(null),
     [cardioId, setCardioId] = useState<string | null>(null),
     [session, setSession] = useRememberedView("today-session"),
     [machineDetail, setMachineDetail] = useRememberedView("today-machine");
@@ -796,7 +797,10 @@ function Today({ nav }: { nav: (p: string) => void }) {
                 className="secondary wide"
                 onClick={() => setSession(draft.id)}
               >
-                เปิดรายการฝึก <ChevronRight size={17} />
+                ทำต่อจากที่ค้างไว้ <ChevronRight size={17} />
+              </button>
+              <button className="text-button" onClick={() => setDiscardDraft(draft.id)}>
+                ทิ้งร่างการฝึก
               </button>
             </>
           ) : (
@@ -950,6 +954,23 @@ function Today({ nav }: { nav: (p: string) => void }) {
       )}
       {session && active.some((e) => e.id === session && e.kind === "session") &&
         <SessionEditor id={session} close={() => setSession(null)} />}
+      {discardDraft && (
+        <Modal title="ทิ้งร่างการฝึก" close={() => setDiscardDraft(null)}>
+          <div className="form">
+            <p>ย้ายร่างนี้เข้าถังขยะ กู้คืนได้ในหน้าตั้งค่า</p>
+            <button className="danger" onClick={() => {
+              void run(async () => {
+                const current = (await allEntries()).find((e) => e.id === discardDraft);
+                if (!current || current.deleted || current.data.status !== "draft")
+                  throw Error("ร่างนี้เปลี่ยนแล้ว กรุณาเปิดรายการล่าสุด");
+                await trash(discardDraft);
+                writeView(`focus:${discardDraft}`, null);
+                setDiscardDraft(null);
+              }, "ย้ายร่างเข้าถังขยะแล้ว");
+            }}>ยืนยันย้ายร่างเข้าถังขยะ</button>
+          </div>
+        </Modal>
+      )}
       {machineDetail && active.some((e) => e.id === machineDetail && e.kind === "machine") && (
         <MachineDetail
           key={machineDetail}
