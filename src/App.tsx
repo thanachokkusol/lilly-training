@@ -348,7 +348,7 @@ function writeView(name: string, value: string | null) {
   } catch { /* Views can still open when storage is unavailable. */ }
 }
 
-function useRememberedView(name: string, fallback: string | null = null) {
+export function useRememberedView(name: string, fallback: string | null = null) {
   const [value, setValue] = useState(() => readView(name) ?? fallback);
   return [value, (next: string | null) => {
     writeView(name, next);
@@ -2918,7 +2918,7 @@ function OCRModal({
 }
 function useFormDraft(kind: "body" | "cardio", entry?: Entry) {
   const owner = config() ? localStorage.getItem("lilly-owner") ?? "owner" : "local";
-  const key = `lilly-form:${config()?.url ?? "local"}:${owner}:${kind}:${entry?.id ?? "new"}`;
+  const key = `lilly-form:${sandbox ? "sandbox" : config()?.url ?? "local"}:${owner}:${kind}:${entry?.id ?? "new"}`;
   const [initial, setInitial] = useState<Record<string, string>>(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(key) ?? "null");
@@ -3059,9 +3059,11 @@ export function BodyForm({
 }
 function HistoryPage() {
   const { entries, run } = useData(),
-    [selected, setSelected] = useState<Entry | null>(null),
+    [selectedId, setSelectedId] = useRememberedView("history-detail"),
     [filter, setFilter] = useState("all"),
     [gym, setGym] = useState("");
+  const selected = entries.find((e) => e.id === selectedId && !e.deleted);
+  const setSelected = (entry: Entry | null) => setSelectedId(entry?.id ?? null);
   const sessionSummary = (session: Session) => {
     const sets = session.exercises.flatMap((exercise) => {
       const done = exercise.sets.filter((set) => set.done);

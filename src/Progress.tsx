@@ -21,7 +21,7 @@ import {
   cardioTotals,
   exerciseKey,
 } from "./core";
-import { useData, Header, Stat, Empty, BodyForm } from "./App";
+import { useData, Header, Stat, Empty, BodyForm, useRememberedView } from "./App";
 const shortDate = (d: string) =>
   new Intl.DateTimeFormat("th-TH-u-ca-gregory", {
     day: "numeric",
@@ -32,7 +32,7 @@ export default function Progress() {
   const { entries } = useData(),
     [metric, setMetric] = useState("weight"),
     [machine, setMachine] = useState(""),
-    [bodyForm, setBodyForm] = useState(false);
+    [bodyForm, setBodyForm] = useRememberedView("new-body-form");
   const active = entries.filter((e) => !e.deleted),
     bodies = active
       .filter((e) => e.kind === "body")
@@ -61,7 +61,7 @@ export default function Progress() {
         title="ความก้าวหน้า"
         subtitle="ผลวัดร่างกาย น้ำหนักรายเครื่อง และคาร์ดิโอรายสัปดาห์"
       >
-        <button className="primary" onClick={() => setBodyForm(true)}>
+        <button className="primary" onClick={() => setBodyForm("open")}>
           <Plus size={18} />
           บันทึกผลวัด
         </button>
@@ -176,7 +176,7 @@ export default function Progress() {
           </ResponsiveContainer>
         </div>
       </section>
-      {bodyForm && <BodyForm close={() => setBodyForm(false)} />}
+      {bodyForm && <BodyForm close={() => setBodyForm(null)} />}
     </>
   );
 }
