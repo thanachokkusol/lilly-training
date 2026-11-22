@@ -1297,11 +1297,11 @@ function machineVariants(entries: Entry[], machine: Machine) {
   );
 }
 
-function MachineTile({ e, onClick }: { e: Entry; onClick: () => void }) {
+function MachineTile({ e, onClick, preferWe = true }: { e: Entry; onClick: () => void; preferWe?: boolean }) {
   const { entries } = useData(),
     m = e.data as Machine,
     last = latestExercise(entries, e.id, today());
-  const preferred = machineVariants(entries, m).find((x) => x.data.gym === "WE Fitness" && machinePhotoIds(entries, x.id, x.data).main);
+  const preferred = preferWe && machineVariants(entries, m).find((x) => x.data.gym === "WE Fitness" && machinePhotoIds(entries, x.id, x.data).main);
   const cover = preferred ?? e;
   return (
     <button className="machine-tile" onClick={onClick}>
@@ -1407,7 +1407,7 @@ function Machines() {
       </label>
       <div className="machine-grid">
         {exerciseCards(entries, machines).map((e) => (
-          <MachineTile key={e.id} e={e} onClick={() => setSelected(e.id)} />
+          <MachineTile key={e.id} e={e} preferWe={!gym} onClick={() => setSelected(e.id)} />
         ))}
       </div>
       {!machines.length && <Empty text="ยังไม่มีเครื่องในหมวดนี้" />}
