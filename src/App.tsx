@@ -1302,7 +1302,7 @@ function MachineTile({ e, onClick, preferWe = true }: { e: Entry; onClick: () =>
     m = e.data as Machine,
     last = latestExercise(entries, e.id, today());
   const preferred = preferWe && machineVariants(entries, m).find((x) => x.data.gym === "WE Fitness" && machinePhotoIds(entries, x.id, x.data).main);
-  const cover = preferred ?? e;
+  const cover = preferred || e;
   return (
     <button className="machine-tile" onClick={onClick}>
       <div className="machine-photo">
