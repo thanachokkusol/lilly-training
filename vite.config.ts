@@ -27,6 +27,7 @@ export default defineConfig({
         const names = Object.keys(bundle).filter((n) => !n.endsWith(".map"));
         const hash = createHash("sha256")
           .update(names.join("|"))
+          .update(fs.readFileSync("index.html"))
           .digest("hex")
           .slice(0, 12);
         const preload = [
