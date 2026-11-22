@@ -1,6 +1,20 @@
 import { expect, it } from "vitest";
-import { exerciseProgress } from "./core";
-import type { Entry } from "./types";
+import { exerciseProgress, machinePhotoIds } from "./core";
+import type { Entry, Machine } from "./types";
+
+it("keeps a Jett reference photo on Jett even if an old WE card linked it", () => {
+  const base = { version: 1, dirty: false, updatedAt: "" };
+  const reference = "photo-jett-ref-pullup";
+  const jett: Machine = { name: "Assisted Pull-up", gym: "Jett", thai: "", group: "หลัง", setup: "", cues: "", loadMode: "assistance", photoId: reference };
+  const we: Machine = { ...jett, gym: "WE Fitness", referencePhotoId: reference };
+  const entries: Entry[] = [
+    { ...base, id: "jett-pullup", kind: "machine", data: jett },
+    { ...base, id: "we-pullup", kind: "machine", data: we },
+    { ...base, id: reference, kind: "photo", data: { machineId: "we-pullup" } },
+  ];
+  expect(machinePhotoIds(entries, "we-pullup", we)).toEqual({ photos: [], main: undefined });
+  expect(machinePhotoIds(entries, "jett-pullup", jett).main).toBe(reference);
+});
 
 it("continues the index when switching gyms and compares returning sets with the same machine", () => {
   const results = [["we", 25], ["we", 30], ["m", 25], ["m", 30], ["we", 33]] as const;

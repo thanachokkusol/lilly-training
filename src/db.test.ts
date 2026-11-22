@@ -13,8 +13,28 @@ import {
   photoBlob,
   getEntry,
   moveReviewedSession,
+  mergeExerciseGroups,
 } from "./db";
 describe("durable records and backup", () => {
+  it("merges exercise names without moving sets or photos between physical machines", async () => {
+    const data = { thai: "", group: "หลัง", setup: "", cues: "", loadMode: "total" };
+    const old = await save("machine", { ...data, name: "QA Seated Row", gym: "Jett", photoId: "merge-photo" }, "merge-old");
+    const canonical = await save("machine", { ...data, name: "QA Seated Cable Row", gym: "M Fitness" }, "merge-canonical");
+    const sets = [{ id: "merge-set", load: 20, reps: 10, done: true }];
+    const session = await save("session", {
+      date: "2026-11-10", title: "Merge fixture", status: "completed",
+      exercises: [{ machineId: old.id, loadMode: "total", note: "", setup: "", sets }],
+    }, "merge-session");
+    await mergeExerciseGroups("qa seated row", "qa seated cable row");
+    expect((await getEntry(old.id))?.data).toMatchObject({
+      name: "QA Seated Cable Row", gym: "Jett", photoId: "merge-photo",
+      aliases: ["QA Seated Row"], exerciseId: "qa seated cable row",
+    });
+    expect((await getEntry(canonical.id))?.data.exerciseId).toBe("qa seated cable row");
+    expect((await getEntry(session.id))?.data.exercises[0]).toMatchObject({
+      machineId: old.id, originalName: "QA Seated Row", sets,
+    });
+  });
   it("rejects a stale migration review and stores the machine and repointed session together", async () => {
     const data = {
       date: "2026-11-22", title: "Migration fixture", status: "completed",

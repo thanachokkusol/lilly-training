@@ -169,7 +169,7 @@ function Photo({
   const { entries } = useData();
   const revision = entries.find(
     (e) => e.id === id && e.kind === "photo",
-  )?.updatedAt;
+  );
   useEffect(() => {
     let alive = true,
       url = "";
@@ -430,11 +430,14 @@ export default function App() {
     syncing.current = true;
     setBusy(true);
     try {
-      const r = await sync();
+      const r = await sync(async () => {
+        await refresh();
+        setInitialSync(authUser);
+      });
       await refresh();
-      if (!silent && (r.pushed || r.conflicts))
+      if (!silent && (r.pushed || r.conflicts || r.missingPhotos))
         notify(
-          `ซิงก์แล้ว · ส่ง ${r.pushed} รายการ${r.conflicts ? ` · รอเลือกฉบับ ${r.conflicts} รายการ` : ""}`,
+          `ซิงก์แล้ว · ส่ง ${r.pushed} รายการ${r.conflicts ? ` · รอเลือกฉบับ ${r.conflicts} รายการ` : ""}${r.missingPhotos ? ` · รูปรอดึง ${r.missingPhotos} รูป` : ""}`,
         );
     } catch (e) {
       if (!silent) notify(e instanceof Error ? e.message : String(e));

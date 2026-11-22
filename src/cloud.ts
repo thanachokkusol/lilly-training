@@ -5,6 +5,7 @@ import {
   putEntry,
   photoBlob,
   storePhoto,
+  clearPhotoBlob,
   sandbox,
 } from "./db";
 import { validateEntry } from "./validation";
@@ -69,8 +70,8 @@ export function configure(c: CloudConfig) {
   client = null;
 }
 let syncing = false;
-export async function sync() {
-  if (syncing) return { pushed: 0, pulled: 0, conflicts: 0 };
+export async function sync(onRecordsReady?: () => Promise<void>) {
+  if (syncing) return { pushed: 0, pulled: 0, conflicts: 0, missingPhotos: 0 };
   const c = await cloud();
   if (!c) throw Error("ยังไม่ได้เชื่อม Supabase");
   const {
@@ -157,6 +158,7 @@ export async function sync() {
       }
     }
     let offset = 0;
+    const photos: Array<{ id: string; path: string; version: number }> = [];
     for (;;) {
       const { data, error } = await c
         .from("training_records")
@@ -169,6 +171,15 @@ export async function sync() {
         const current = await getEntry(row.id);
         if (current?.dirty || current?.conflict) continue;
         validateEntry({ id: row.id, kind: row.kind, data: row.payload });
+        if (row.kind === "photo" && !row.deleted) {
+          if (current && current.data._photoPath !== row.payload._photoPath)
+            await clearPhotoBlob(row.id);
+          if (!(await photoBlob(row.id))) photos.push({
+            id: row.id,
+            path: row.payload._photoPath ?? `${user.id}/${row.id}.jpg`,
+            version: row.version,
+          });
+        }
         await putEntry({
           id: row.id,
           kind: row.kind,
@@ -179,23 +190,27 @@ export async function sync() {
           deleted: row.deleted,
         });
         pulled++;
-        if (
-          row.kind === "photo" &&
-          !row.deleted &&
-          (!(await photoBlob(row.id)) ||
-            current?.data._photoPath !== row.payload._photoPath)
-        ) {
-          const { data: b, error: photoError } = await c.storage
-            .from("training-photos")
-            .download(row.payload._photoPath ?? `${user.id}/${row.id}.jpg`);
-          if (photoError) throw photoError;
-          if (b) await storePhoto(row.id, b);
-        }
       }
       if ((data?.length ?? 0) < 500) break;
       offset += 500;
     }
-    return { pushed, pulled, conflicts };
+    await onRecordsReady?.();
+    let missingPhotos = 0;
+    for (const photo of photos) {
+      try {
+        const { data: blob, error } = await c.storage.from("training-photos").download(photo.path);
+        if (error || !blob) {
+          missingPhotos++;
+          continue;
+        }
+        const entry = await getEntry(photo.id);
+        if (entry?.version === photo.version && !entry.dirty && !entry.deleted)
+          await storePhoto(photo.id, blob);
+      } catch {
+        missingPhotos++;
+      }
+    }
+    return { pushed, pulled, conflicts, missingPhotos };
   } finally {
     syncing = false;
   }

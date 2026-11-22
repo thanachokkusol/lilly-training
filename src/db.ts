@@ -123,6 +123,9 @@ export async function photoBlob(id: string): Promise<Blob | undefined> {
 export async function storePhoto(id: string, blob: Blob) {
   await (await db).put("photos", blob, id);
 }
+export async function clearPhotoBlob(id: string) {
+  await (await db).delete("photos", id);
+}
 export async function addPhoto(file: Blob, label: string) {
   if (file.size > 30 * 1024 * 1024) throw Error("รูปต้องไม่เกิน 30 MB");
   if (!file.type.startsWith("image/")) throw Error("เลือกไฟล์รูปภาพ");
