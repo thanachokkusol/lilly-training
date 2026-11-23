@@ -94,7 +94,7 @@ import ExerciseChart from "./ExerciseChart";
 import { gymCatalogId, gymName, gymsFor, type Gym } from "./gyms";
 import { planSessionMove, type MachineMove } from "./migration";
 import { recoverFormDraft } from "./formDraft";
-import { exerciseGuide, homeGym, homeMoves, retiredHomeRoutineId } from "./homeTraining";
+import { exerciseDemoLink, exerciseGuide, homeGym, homeMoves, retiredHomeRoutineId } from "./homeTraining";
 type Context = {
   entries: Entry[];
   refresh: () => Promise<void>;
@@ -1612,6 +1612,9 @@ function MachineDetail({ id, close, selectMachine }: {
         <div>
           <h4>วิธีเล่น</h4>
           <p className="preserve">{m.cues || "ยังไม่มีบันทึก"}</p>
+          {exerciseDemoLink(m.name) && (
+            <a className="text-button" href={exerciseDemoLink(m.name)} target="_blank" rel="noreferrer">ดูตัวอย่างท่า</a>
+          )}
         </div>
         <div>
           <h4>รูปเครื่อง</h4>
