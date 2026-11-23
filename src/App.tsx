@@ -94,7 +94,8 @@ import ExerciseChart from "./ExerciseChart";
 import { gymCatalogId, gymName, gymsFor, type Gym } from "./gyms";
 import { planSessionMove, type MachineMove } from "./migration";
 import { recoverFormDraft } from "./formDraft";
-import { exerciseDemoLink, exerciseGuide, exerciseGuideFrames, homeCoachRoutine, homeGym, homeMoves, retiredHomeRoutineId } from "./homeTraining";
+import { exerciseDemoLink, exerciseGuide, exerciseGuideFrames, homeCoachRoutine, homeGym, homeMoves, isObsoleteHomeRoutine } from "./homeTraining";
+import { reportUrl } from "./bodyDetails";
 type Context = {
   entries: Entry[];
   refresh: () => Promise<void>;
@@ -547,9 +548,11 @@ export default function App() {
   const ready = loaded && (!canSync || !online || initialSync === authUser);
   const needsHomeTraining = [homeCoachRoutine, ...homeMoves].some(({ id }) =>
     !entries.some((entry) => entry.id === id));
+  const obsoleteHomeRoutineId = entries.find(isObsoleteHomeRoutine)?.id;
   useEffect(() => {
-    if (ready && !locked && needsHomeTraining) void run(addMissingHomeTraining);
-  }, [ready, locked, needsHomeTraining]);
+    if (ready && !locked && (needsHomeTraining || obsoleteHomeRoutineId))
+      void run(() => addMissingHomeTraining(obsoleteHomeRoutineId));
+  }, [ready, locked, needsHomeTraining, obsoleteHomeRoutineId]);
   const hasPushable = entries.some((e) => e.dirty && !e.conflict);
   useEffect(() => {
     if (!canSync || !online || !hasPushable) return;
@@ -750,7 +753,7 @@ function Today({ nav }: { nav: (p: string) => void }) {
     draft = active
       .filter((e) => e.kind === "session" && e.data.status === "draft")
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0],
-    routines = active.filter((e) => e.kind === "routine" && e.id !== retiredHomeRoutineId),
+    routines = active.filter((e) => e.kind === "routine" && !isObsoleteHomeRoutine(e)),
     machines = active.filter((e) => e.kind === "machine" && !e.data.archived && e.data.gym !== homeGym),
     last = active
       .filter(
@@ -1158,7 +1161,7 @@ function RoutineSettings() {
   const { entries, run } = useData(),
     [edit, setEdit] = useState<Entry | null | undefined>(undefined),
     [selected, setSelected] = useState<string[]>([]);
-  const routines = entries.filter((e) => e.kind === "routine" && !e.deleted && e.id !== retiredHomeRoutineId),
+  const routines = entries.filter((e) => e.kind === "routine" && !e.deleted && !isObsoleteHomeRoutine(e)),
     machines = entries.filter(
       (e) => e.kind === "machine" && !e.deleted && !e.data.archived,
     );
@@ -1990,7 +1993,7 @@ function StartSession({
   });
   const machines = allMachines.filter((e) => e.data.gym === gym);
   const selectedMachines = selection.filter((id) => machines.some((m) => m.id === id));
-  const routines = entries.filter((e) => e.kind === "routine" && !e.deleted && e.id !== retiredHomeRoutineId);
+  const routines = entries.filter((e) => e.kind === "routine" && !e.deleted && !isObsoleteHomeRoutine(e));
   return (
     <Modal title="เริ่มฝึก" close={close}>
       <div className="form">
@@ -3092,21 +3095,26 @@ export function BodyForm({
           e.preventDefault();
           const f = new FormData(e.currentTarget);
           void run(async () => {
+            const enteredUrl = String(f.get("reportUrl") ?? "").trim();
+            const url = reportUrl(enteredUrl);
+            if (enteredUrl && !url) throw Error("กรอกลิงก์เอกสารที่ขึ้นต้นด้วย HTTPS");
             const data: Body = {
+              ...entry?.data,
               date: String(f.get("date")),
               weight: number(f.get("weight")),
               waist: number(f.get("waist")),
               fat: number(f.get("fat")),
               smm: number(f.get("smm")),
               note: String(f.get("note")),
+              reportUrl: url,
               photoId,
             };
             if (
               [data.weight, data.waist, data.fat, data.smm].every(
                 (v) => v === null,
-              )
+              ) && !url && !photoId
             )
-              throw Error("กรอกผลวัดอย่างน้อยหนึ่งค่า");
+              throw Error("กรอกผลวัดอย่างน้อยหนึ่งค่า หรือแนบเอกสาร");
             await save("body", data, entry?.id);
             draft.clear();
             close();
@@ -3156,6 +3164,10 @@ export function BodyForm({
             defaultValue={draft.initial.note ?? entry?.data.note}
             placeholder="เช่น InBody / ก่อนอาหารเช้า"
           />
+        </Field>
+        <Field label="ลิงก์ PDF หรือเอกสาร InBody">
+          <input name="reportUrl" type="url" placeholder="https://…" maxLength={2000}
+            defaultValue={draft.initial.reportUrl ?? entry?.data.reportUrl ?? ""} />
         </Field>
         <label className="secondary">
           <ImagePlus size={18} />
@@ -3681,18 +3693,14 @@ function SettingsPage({
             ส่งออก CSV
           </button>
           {import.meta.env.DEV && (
-            <button
-              className="secondary"
-              onClick={() =>
-                run(async () => {
-                  const r = await fetch("/__private_seed");
-                  if (!r.ok) throw Error("ไม่พบไฟล์ข้อมูลตั้งต้นในเครื่อง");
-                  await inspect(await r.blob());
-                })
-              }
-            >
-              โหลดข้อมูลตั้งต้น (เฉพาะโหมดพัฒนา)
-            </button>
+            <label className="secondary">
+              เลือก ZIP ข้อมูลตั้งต้น (เฉพาะโหมดพัฒนา)
+              <input hidden type="file" accept=".zip,application/zip" onChange={(event) => {
+                const file = event.currentTarget.files?.[0];
+                event.currentTarget.value = "";
+                if (file) void run(() => inspect(file));
+              }} />
+            </label>
           )}
         </div>
       </section>

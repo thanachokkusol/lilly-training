@@ -3,7 +3,7 @@ import type { Entry, Kind, Session } from "./types";
 import { validateEntry } from "./validation";
 import { exerciseKey, today } from "./core";
 import { planSessionMove, type MachineMove } from "./migration";
-import { exerciseGuideFrames, homeCoachRoutine, homeGym, homeMoves } from "./homeTraining";
+import { exerciseGuideFrames, homeCoachRoutine, homeGym, homeMoves, isObsoleteHomeRoutine } from "./homeTraining";
 const loadZip = () => import("jszip").then((m) => m.default);
 export const sandbox =
   typeof location !== "undefined" &&
@@ -50,7 +50,7 @@ export async function addBundledMachinePhotos(machineId: string, name: string, g
   }
   await tx.done;
 }
-export async function addMissingHomeTraining() {
+export async function addMissingHomeTraining(obsoleteId?: string) {
   const tx = (await db).transaction("entries", "readwrite");
   const existing = new Set(await tx.store.getAllKeys());
   const defaults = [
@@ -61,7 +61,12 @@ export async function addMissingHomeTraining() {
   const missing: Entry[] = defaults.filter(({ id }) => !existing.has(id))
     .map((entry) => ({ ...entry, updatedAt, dirty: true, version: 0 }));
   missing.forEach(validateEntry);
-  await Promise.all([...missing.map((entry) => tx.store.add(entry)), tx.done]);
+  const obsolete = obsoleteId ? await tx.store.get(obsoleteId) as Entry | undefined : undefined;
+  const changes = missing.map((entry) => tx.store.add(entry));
+  if (obsolete && isObsoleteHomeRoutine(obsolete)) changes.push(tx.store.put({
+    ...obsolete, data: { ...obsolete.data, retiredBy: homeCoachRoutine.id }, updatedAt, dirty: true, deleted: true,
+  }));
+  await Promise.all([...changes, tx.done]);
 }
 export async function moveMachinePhoto(photoId: string, from: string, to: string) {
   if (from === to) return;

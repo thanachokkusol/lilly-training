@@ -7,7 +7,10 @@ import { createHash } from "node:crypto";
 export default defineConfig({
   base: "./",
   cacheDir: path.join(os.tmpdir(), "lilly-training-vite-cache"),
-  server: { host: "127.0.0.1", strictPort: true },
+  server: {
+    host: "127.0.0.1", strictPort: true,
+    fs: { deny: [".env", ".env.*", "*.{crt,pem}", "**/.git/**", "**/private/**"] },
+  },
   build: {
     rollupOptions: {
       output: {
@@ -68,27 +71,6 @@ export default defineConfig({
             },
           ],
         };
-      },
-    },
-    {
-      name: "local-private-import",
-      configureServer(server) {
-        server.middlewares.use("/__private_seed", async (req, res) => {
-          if (req.method !== "GET") {
-            res.statusCode = 405;
-            res.end();
-            return;
-          }
-          const f = path.resolve("private/initial-backup.zip");
-          if (!fs.existsSync(f)) {
-            res.statusCode = 404;
-            res.end();
-            return;
-          }
-          res.setHeader("Content-Type", "application/zip");
-          res.setHeader("Cache-Control", "no-store");
-          fs.createReadStream(f).pipe(res);
-        });
       },
     },
   ],

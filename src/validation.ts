@@ -1,4 +1,5 @@
 import type { Entry } from "./types";
+import { reportUrl, sizingFields, sizingId, sizingTextFields } from "./bodyDetails";
 const kinds = [
   "machine",
   "session",
@@ -79,6 +80,7 @@ export function validateEntry(e: Pick<Entry, "id" | "kind" | "data">) {
     if (
       !validDate(d.date) ||
       ![d.weight, d.waist, d.fat, d.smm].every((n) => num(n)) ||
+      (d.reportUrl != null && (typeof d.reportUrl !== "string" || !reportUrl(d.reportUrl))) ||
       (d.fat !== null && d.fat > 100)
     )
       throw Error("ผลวัดไม่ถูกต้อง");
@@ -126,6 +128,14 @@ export function validateEntry(e: Pick<Entry, "id" | "kind" | "data">) {
       Object.keys(d.fields).length > 24 ||
       Object.values(d.fields).some((v) => typeof v !== "string" || v.length > 5000))
       throw Error("ข้อมูลแบบร่างไม่ถูกต้อง");
+  } else if (e.kind === "settings" && e.id === sizingId) {
+    if (!validDate(d.date) || typeof d.note !== "string" || d.note.length > 1000 ||
+      !d.values || typeof d.values !== "object" || Array.isArray(d.values) ||
+      Object.entries(d.values).some(([key, value]) => !sizingFields.some(([field]) => field === key) ||
+        typeof value !== "string" || !value.trim() ||
+        (sizingTextFields.includes(key) ? value.length > 100 : !/^\d+(\.\d+)?$/.test(value) || Number(value) < 0.1 || Number(value) > 400))) {
+      throw Error("สัดส่วนหรือไซส์ไม่ถูกต้อง");
+    }
   } else if (e.kind === "settings" && e.id === "settings-gym-catalog") {
     if (!Array.isArray(d.gyms) || d.gyms.some((g: any) =>
       !g || typeof g.id !== "string" || !g.id.trim() || typeof g.name !== "string" ||

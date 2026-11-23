@@ -1511,16 +1511,6 @@ summary {
   margin-left: auto;
   padding: 5px;
 }
-.exercise-guide { margin-top: 12px; }
-.exercise-guide-frames {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  margin: 10px 0;
-}
-.exercise-guide-frames figure { margin: 0; }
-.exercise-guide-frames img { display: block; width: 100%; border-radius: 8px; }
-.exercise-guide-frames figcaption { padding-top: 4px; font-size: 12px; }
 @media (min-width: 1600px) {
   .content {
     padding-top: 50px;
@@ -2865,6 +2855,26 @@ summary {
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 12px;
+}
+.body-details-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+.body-details-grid > div {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.body-details-grid dt,
+.body-details-grid small {
+  color: #576359;
+  overflow-wrap: anywhere;
+}
+.body-details-grid dd {
+  margin: 2px 0;
+  font-weight: 700;
 }
 .stats-row.four {
   grid-template-columns: repeat(4, minmax(0, 1fr));

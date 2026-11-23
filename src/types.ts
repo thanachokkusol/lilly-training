@@ -84,6 +84,7 @@ export interface Body {
   waist: number | null;
   fat: number | null;
   smm: number | null;
+  reportUrl?: string;
   note: string;
   photoId?: string;
 }

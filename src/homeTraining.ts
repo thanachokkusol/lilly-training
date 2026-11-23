@@ -1,7 +1,16 @@
-import type { Machine } from "./types";
+import type { Entry, Machine } from "./types";
 
 export const homeGym = "ที่บ้าน";
-export const retiredHomeRoutineId = "routine-home-full-body";
+const retiredHomeRoutineId = "routine-home-full-body";
+const originalRoutineMoves = ["home-goblet-squat", "home-floor-press", "home-dumbbell-row", "home-glute-bridge", "home-dead-bug"];
+export function isObsoleteHomeRoutine(entry: Entry) {
+  const { data } = entry;
+  return entry.id === retiredHomeRoutineId && entry.kind === "routine" && !entry.deleted &&
+    !entry.conflict && !data.retiredBy &&
+    data.title === "ที่บ้าน · เวททั้งตัว" && data.note === "เลือกน้ำหนักที่คุมท่าได้ บันทึกเฉพาะเซ็ตที่ทำจริง" &&
+    data.days?.length === 0 && Array.isArray(data.machineIds) &&
+    data.machineIds.length > 0 && data.machineIds.every((id: string) => originalRoutineMoves.includes(id));
+}
 const dumbbellPair = "ดัมเบลคู่ 2.5 / 5 / 10 กก. ต่อข้าง เลือกเท่ากันทั้งสองข้าง";
 const kettlebell = "เคตเทิลเบล 5 กก. หนึ่งลูก";
 export const homeMoves = [

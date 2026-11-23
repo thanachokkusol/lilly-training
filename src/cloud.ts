@@ -13,17 +13,29 @@ export interface CloudConfig {
   url: string;
   key: string;
 }
+function validCloudConfig(value: unknown): value is CloudConfig {
+  if (!value || typeof value !== "object" || !("url" in value) || !("key" in value) ||
+    typeof value.url !== "string" || !/^https:\/\/[a-z0-9-]+\.supabase\.co\/?$/i.test(value.url) ||
+    typeof value.key !== "string") return false;
+  if (value.key.startsWith("sb_publishable_")) return true;
+  if (!value.key.startsWith("eyJ")) return false;
+  try {
+    const payload = value.key.split(".")[1].replaceAll("-", "+").replaceAll("_", "/");
+    return JSON.parse(atob(payload)).role === "anon";
+  } catch {
+    return false;
+  }
+}
 export const config = (): CloudConfig | null => {
   if (sandbox) return null;
   try {
     const saved = JSON.parse(localStorage.getItem("lilly-cloud") || "null");
-    if (saved) return saved;
-    const url = import.meta.env.VITE_SUPABASE_URL,
-      key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-    return url && key ? { url, key } : null;
+    if (validCloudConfig(saved)) return saved;
   } catch {
-    return null;
+    // Ignore invalid old browser configuration and fall back to the build settings.
   }
+  const built = { url: import.meta.env.VITE_SUPABASE_URL, key: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY };
+  return validCloudConfig(built) ? built : null;
 };
 let client: Promise<SupabaseClient> | null = null;
 /** Supabase is only downloaded when a cloud project is configured. */
@@ -56,16 +68,7 @@ export function configure(c: CloudConfig) {
   if (sandbox) throw Error("พื้นที่ทดสอบไม่เชื่อมบัญชีออนไลน์");
   if (!/^https:\/\/[a-z0-9-]+\.supabase\.co\/?$/i.test(c.url))
     throw Error("ใช้ Project URL รูปแบบ https://….supabase.co");
-  if (!c.key.startsWith("sb_publishable_") && !c.key.startsWith("eyJ"))
-    throw Error("ใช้ Publishable หรือ anon key เท่านั้น");
-  if (c.key.startsWith("eyJ")) {
-    try {
-      const p = JSON.parse(atob(c.key.split(".")[1]));
-      if (p.role !== "anon") throw Error();
-    } catch {
-      throw Error("ห้ามใช้ service_role หรือ secret key");
-    }
-  }
+  if (!validCloudConfig(c)) throw Error("ใช้ Publishable หรือ anon key เท่านั้น");
   localStorage.setItem("lilly-cloud", JSON.stringify(c));
   client = null;
 }
@@ -157,20 +160,23 @@ export async function sync(onRecordsReady?: () => Promise<void>) {
         pushed++;
       }
     }
-    let offset = 0;
+    let lastId: string | undefined;
     const photos: Array<{ id: string; path: string; version: number }> = [];
     for (;;) {
-      const { data, error } = await c
+      const query = c
         .from("training_records")
-        .select("*")
+        .select("id,kind,payload,version,deleted,updated_at")
         .eq("user_id", user.id)
         .order("id")
-        .range(offset, offset + 499);
+        .limit(500);
+      const { data, error } = await (lastId ? query.gt("id", lastId) : query);
       if (error) throw error;
       for (const row of data ?? []) {
         const current = await getEntry(row.id);
         if (current?.dirty || current?.conflict) continue;
-        validateEntry({ id: row.id, kind: row.kind, data: row.payload });
+        const unchanged = current && current.version === row.version && current.kind === row.kind &&
+          !!current.deleted === row.deleted;
+        if (!unchanged) validateEntry({ id: row.id, kind: row.kind, data: row.payload });
         if (row.kind === "photo" && !row.deleted) {
           if (current && current.data._photoPath !== row.payload._photoPath)
             await clearPhotoBlob(row.id);
@@ -180,6 +186,7 @@ export async function sync(onRecordsReady?: () => Promise<void>) {
             version: row.version,
           });
         }
+        if (unchanged) continue;
         await putEntry({
           id: row.id,
           kind: row.kind,
@@ -192,7 +199,7 @@ export async function sync(onRecordsReady?: () => Promise<void>) {
         pulled++;
       }
       if ((data?.length ?? 0) < 500) break;
-      offset += 500;
+      lastId = data!.at(-1)!.id;
     }
     await onRecordsReady?.();
     let missingPhotos = 0;
@@ -216,7 +223,7 @@ export async function sync(onRecordsReady?: () => Promise<void>) {
   }
 }
 export async function resolveConflict(id: string, choice: "local" | "remote") {
-  const e = (await allEntries()).find((e) => e.id === id);
+  const e = await getEntry(id);
   if (!e?.conflict) return;
   const r = e.conflict;
   if (choice === "remote") {
