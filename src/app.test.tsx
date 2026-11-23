@@ -42,7 +42,7 @@ it("shows individual home exercise cards under the home filter", async () => {
   try {
     fireEvent.click(screen.getByRole("button", { name: /Goblet Squat.*มีเครื่องที่/ }));
     const dialog = await topDialog();
-    expect(await dialog.findByRole("button", { name: "รูปหลัก", exact: true })).toBeTruthy();
+    expect(await dialog.findByRole("button", { name: "รูปหลัก" })).toBeTruthy();
     expect(dialog.getByRole("button", { name: "เปิดรูปเครื่อง" })).toBeTruthy();
     fireEvent.click(dialog.getByRole("button", { name: "ลบรูปที่เปิด" }));
     fireEvent.click(screen.getByRole("button", { name: "ยืนยันลบรูป" }));
