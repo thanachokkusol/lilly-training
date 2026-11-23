@@ -2259,7 +2259,7 @@ function CardioPage({ openReport = false }: { openReport?: boolean }) {
     false,
     withWeights,
   );
-  const mix = cardioMix(logs);
+  const mix = cardioMix(logs, goal * 60);
   return (
     <>
       <Header title="Cardio" subtitle="รอบสัปดาห์อาทิตย์–เสาร์ · เวลาไทย">
@@ -2306,8 +2306,8 @@ function CardioPage({ openReport = false }: { openReport?: boolean }) {
                 จากเป้าหมาย {goal} นาที · {totals.count} รายการ
               </p>
             </div>
-            <div className="ring cardio-mix-ring" style={{ background: mix.background }} aria-hidden="true">
-              <div><strong>{Math.floor(mix.total / 60)}</strong><span>นาทีรวม</span></div>
+            <div className="ring cardio-mix-ring" style={{ background: mix.background }}>
+              <div><strong>{mix.percent.toFixed(1)}<small>%</small></strong><span>ของเป้าหมาย</span></div>
             </div>
           </div>
           <dl className="cardio-mix-legend">

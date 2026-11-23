@@ -99,6 +99,7 @@ export default function Progress() {
           บันทึกผลวัด
         </button>
       </Header>
+      <TrainingCalendar entries={entries} />
       <section className="panel">
         <div className="section-title">
           <h2>แนวโน้มรูปร่าง</h2>
@@ -148,7 +149,6 @@ export default function Progress() {
           </ResponsiveContainer>
         </div>
       </section>
-      <TrainingCalendar entries={entries} />
       <section className="panel">
         <h2>Insights</h2>
         <div className="metric-card-grid">

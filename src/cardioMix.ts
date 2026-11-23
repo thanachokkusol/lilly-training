@@ -1,6 +1,6 @@
 import type { Entry } from "./types";
 
-export function cardioMix(logs: Entry[]) {
+export function cardioMix(logs: Entry[], goalSeconds: number) {
   const groups = [
     { label: "เดิน", color: "#e1eba9", seconds: 0 },
     { label: "มวย", color: "#ffb071", seconds: 0 },
@@ -14,13 +14,17 @@ export function cardioMix(logs: Entry[]) {
     groups[index].seconds += log.data.seconds;
   }
   const total = groups.reduce((sum, group) => sum + group.seconds, 0);
+  const percent = total / goalSeconds * 100;
+  const scale = Math.max(goalSeconds, total);
+  const track = "#ffffff20";
   let elapsed = 0;
   const stops = groups.filter(({ seconds }) => seconds > 0).map(({ color, seconds }) => {
-    const start = elapsed / total * 100;
+    const start = elapsed / scale * 100;
     elapsed += seconds;
-    return `${color} ${start}% ${elapsed / total * 100}%`;
+    return `${color} ${start}% ${elapsed / scale * 100}%`;
   });
+  if (total > 0 && total < goalSeconds) stops.push(`${track} ${percent}% 100%`);
   const background = stops.length > 1 ? `conic-gradient(${stops.join(", ")})` :
-    groups.find(({ seconds }) => seconds > 0)?.color ?? "#ffffff20";
-  return { groups, total, background };
+    groups.find(({ seconds }) => seconds > 0)?.color ?? track;
+  return { groups, percent, background };
 }

@@ -16,11 +16,16 @@ it("splits confirmed cardio seconds by activity, independently of walking goal e
     id: activity, kind: "cardio", version: 1, updatedAt: "", dirty: false,
     data: { activity, seconds, status, walkGoal: false },
   });
-  const mix = cardioMix([log("เดินลู่วิ่ง", 60), log("ต่อยมวย", 120), log("แบดมินตัน", 60), log("เดิน", 500, "review")]);
+  const mix = cardioMix([log("เดินลู่วิ่ง", 60), log("ต่อยมวย", 120), log("แบดมินตัน", 60), log("เดิน", 500, "review")], 200);
   expect(mix.groups.map(({ seconds }) => seconds)).toEqual([60, 120, 60]);
   expect(mix.background).toContain("25% 75%");
-  expect(cardioMix([log("ต่อยมวย", 30)]).background).toBe(mix.groups[1].color);
-  expect(cardioMix([]).total).toBe(0);
+  expect(mix.percent).toBe(120);
+  expect(mix.background).not.toContain("#ffffff20");
+  expect(cardioMix([log("ต่อยมวย", 30)], 30).background).toBe(mix.groups[1].color);
+  expect(cardioMix([], 9000).percent).toBe(0);
+  const partial = cardioMix([log("เดิน", 1205)], 9000);
+  expect(partial.percent.toFixed(1)).toBe("13.4");
+  expect(partial.background).toContain(`#ffffff20 ${partial.percent}% 100%`);
 });
 
 it("links archived measurements and evidence by date without converting blank values to zero", () => {
