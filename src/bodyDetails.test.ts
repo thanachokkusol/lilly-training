@@ -1,7 +1,27 @@
 import { expect, it } from "vitest";
-import { archivedInBody, reportUrl, sizingId } from "./bodyDetails";
+import { archivedInBody, assessBmi, assessWaist, reportUrl, sizingId } from "./bodyDetails";
 import type { Entry } from "./types";
 import { validateEntry } from "./validation";
+import { cardioMix } from "./cardioMix";
+
+it("uses the Asian adult BMI thresholds and the waist-to-height reference", () => {
+  expect([18.49, 18.5, 22.99, 23, 25, 30].map((value) => assessBmi(value).tone))
+    .toEqual(["watch", "normal", "normal", "watch", "high", "very-high"]);
+  expect(assessWaist(85, 170).tone).toBe("normal");
+  expect(assessWaist(86, 170).tone).toBe("high");
+});
+
+it("splits confirmed cardio seconds by activity, independently of walking goal eligibility", () => {
+  const log = (activity: string, seconds: number, status = "confirmed"): Entry => ({
+    id: activity, kind: "cardio", version: 1, updatedAt: "", dirty: false,
+    data: { activity, seconds, status, walkGoal: false },
+  });
+  const mix = cardioMix([log("เดินลู่วิ่ง", 60), log("ต่อยมวย", 120), log("แบดมินตัน", 60), log("เดิน", 500, "review")]);
+  expect(mix.groups.map(({ seconds }) => seconds)).toEqual([60, 120, 60]);
+  expect(mix.background).toContain("25% 75%");
+  expect(cardioMix([log("ต่อยมวย", 30)]).background).toBe(mix.groups[1].color);
+  expect(cardioMix([]).total).toBe(0);
+});
 
 it("links archived measurements and evidence by date without converting blank values to zero", () => {
   const date = "2026-10-01";

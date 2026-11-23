@@ -1,9 +1,7 @@
 import { useState } from "react";
-import { Plus, Scale, Target, Flame, Dumbbell } from "lucide-react";
+import { Plus, ChevronRight } from "lucide-react";
 import {
   ResponsiveContainer,
-  LineChart,
-  Line,
   XAxis,
   YAxis,
   Tooltip,
@@ -15,6 +13,8 @@ import {
 import ExerciseChart from "./ExerciseChart";
 import TrainingCalendar from "./TrainingCalendar";
 import BodyProfile from "./BodyProfile";
+import { BodyMetricChart, BodyMetricDialog, type BodyMetricDetail } from "./BodyMetricChart";
+import { archivedInBody, assessBmi, assessWaist, bmiReference, bodyMetrics, bodyMetricSeries, sizingId, waistReference } from "./bodyDetails";
 import {
   today,
   weekOf,
@@ -23,7 +23,7 @@ import {
   cardioTotals,
   exerciseKey,
 } from "./core";
-import { useData, Header, Stat, Empty, BodyForm, useRememberedView } from "./App";
+import { useData, Header, BodyForm, useRememberedView } from "./App";
 const shortDate = (d: string) =>
   new Intl.DateTimeFormat("th-TH-u-ca-gregory", {
     day: "numeric",
@@ -32,14 +32,14 @@ const shortDate = (d: string) =>
   }).format(new Date(d + "T12:00:00Z"));
 export default function Progress() {
   const { entries } = useData(),
-    [metric, setMetric] = useState("weight"),
+    [metric, setMetric] = useState<string>("weight"),
+    [detail, setDetail] = useState<BodyMetricDetail | null>(null),
     [machine, setMachine] = useState(""),
     [bodyForm, setBodyForm] = useRememberedView("new-body-form");
   const active = entries.filter((e) => !e.deleted),
     bodies = active
       .filter((e) => e.kind === "body")
       .sort((a, b) => a.data.date.localeCompare(b.data.date)),
-    last = bodies.at(-1),
     machines = active
       .filter((e) => e.kind === "machine")
       .sort(
@@ -50,10 +50,41 @@ export default function Progress() {
       ),
     exercises = Array.from(new Map(machines.map((m) => [exerciseKey(m.data), m])).entries()),
     chosen = exercises.some(([key]) => key === machine) ? machine : exercises[0]?.[0];
-  const chart = bodies.map((e) => ({
-    date: dateLabel(e.data.date),
-    value: e.data[metric],
-  }));
+  const reports = archivedInBody(entries);
+  const heightPoints = bodyMetricSeries([], reports, "height", "ส่วนสูง", "cm");
+  const sizing = active.find((entry) => entry.id === sizingId)?.data;
+  const manualHeight = Number(sizing?.values?.height);
+  const height = manualHeight > 0 && (!heightPoints.length || sizing.date >= heightPoints.at(-1)!.date)
+    ? manualHeight : heightPoints.at(-1)?.value;
+  const weights = bodyMetricSeries(bodies, reports, "weight", "น้ำหนัก");
+  const recordedBmi = bodyMetricSeries(bodies, reports, "bmi", "BMI");
+  const bmiByDate = new Map(recordedBmi.map(({ date, value }) => [date, value]));
+  if (height && height > 0) {
+    for (const weight of weights) {
+      if (!bmiByDate.has(weight.date)) bmiByDate.set(weight.date, weight.value / (height / 100) ** 2);
+    }
+  }
+  const progressMetrics = bodyMetrics.map(([key, label, unit, archiveLabel]) => {
+    const points = key === "bmi"
+      ? [...bmiByDate].sort(([a], [b]) => a.localeCompare(b)).map(([date, value]) => ({
+        date, value: recordedBmi.find((point) => point.date === date)?.value ?? Number(value.toFixed(3)),
+      }))
+      : bodyMetricSeries(bodies, reports, key, archiveLabel);
+    const latest = points.at(-1);
+    const bmi = key === "bmi" ? (latest && bmiByDate.get(latest.date))
+      : key === "weight" && latest ? bmiByDate.get(latest.date) : undefined;
+    const waist = key === "waist" && latest && height && height > 0;
+    return {
+      key, label, unit, points, latest,
+      assessment: bmi !== undefined ? assessBmi(bmi) : waist ? assessWaist(latest.value, height) : undefined,
+      reference: bmi !== undefined ? bmiReference : waist ? waistReference : undefined,
+      note: bmi !== undefined
+        ? `${recordedBmi.some((point) => point.date === latest?.date) ? "BMI จากใบผลวัด" : `BMI คำนวณจากน้ำหนักและส่วนสูงที่บันทึก ${height} ซม.`} · BMI เป็นเกณฑ์คัดกรองและแยกมวลกล้ามเนื้อกับไขมันไม่ได้`
+        : ["fat", "smm"].includes(key) ? "เทียบการเปลี่ยนแปลงจากวิธีวัดเดียวกัน และใช้ช่วงอ้างอิงในใบผล InBody" : undefined,
+    };
+  });
+  const chart = progressMetrics.find(({ key }) => key === metric) ?? progressMetrics[0];
+  const goal = active.find((entry) => entry.id === "settings-main")?.data.cardioGoal ?? 150;
   const weeks = Array.from({ length: 8 }, (_, i) =>
     addDays(weekOf(today()), (i - 7) * 7),
   );
@@ -68,34 +99,6 @@ export default function Progress() {
           บันทึกผลวัด
         </button>
       </Header>
-      <TrainingCalendar entries={entries} />
-      <BodyProfile bodies={bodies} />
-      {last && (
-        <p className="muted measure-date">
-          ผลวัดล่าสุดของแต่ละค่า · บันทึกล่าสุด {dateLabel(last.data.date)}
-        </p>
-      )}
-      <div className="stats-row four">
-        {(
-          [
-            ["weight", "น้ำหนัก", "กก.", <Scale key="w" />],
-            ["waist", "รอบเอว", "ซม.", <Target key="t" />],
-            ["fat", "ไขมัน", "%", <Flame key="f" />],
-            ["smm", "กล้ามเนื้อ", "กก.", <Dumbbell key="d" />],
-          ] as const
-        ).map(([k, label, unit, icon]) => {
-          const hit = [...bodies].reverse().find((e) => e.data[k] !== null);
-          return (
-            <Stat
-              key={k}
-              icon={icon}
-              label={hit ? `${label} · ${shortDate(hit.data.date)}` : label}
-              value={hit?.data[k]?.toString() ?? "–"}
-              unit={unit}
-            />
-          );
-        })}
-      </div>
       <section className="panel">
         <div className="section-title">
           <h2>แนวโน้มรูปร่าง</h2>
@@ -104,45 +107,10 @@ export default function Progress() {
             value={metric}
             onChange={(e) => setMetric(e.target.value)}
           >
-            <option value="weight">น้ำหนัก (กก.)</option>
-            <option value="waist">รอบเอว (ซม.)</option>
-            <option value="fat">ไขมัน (%)</option>
-            <option value="smm">มวลกล้ามเนื้อ (กก.)</option>
+            {progressMetrics.map(({ key, label, unit }) => <option key={key} value={key}>{label} ({unit})</option>)}
           </select>
         </div>
-        {chart.some((p) => p.value !== null) ? (
-          <div className="chart">
-            <ResponsiveContainer>
-              <LineChart
-                data={chart}
-                margin={{ top: 10, right: 16, left: -12, bottom: 0 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis
-                  dataKey="date"
-                  tick={{ fontSize: 11 }}
-                  padding={{ left: 14, right: 14 }}
-                />
-                <YAxis
-                  domain={["auto", "auto"]}
-                  tick={{ fontSize: 11 }}
-                  width={44}
-                />
-                <Tooltip />
-                <Line
-                  dataKey="value"
-                  name="ผลวัด"
-                  stroke="#476c4c"
-                  strokeWidth={3}
-                  dot={{ r: 5 }}
-                  connectNulls
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        ) : (
-          <Empty text="ยังไม่มีผลวัดสำหรับตัวชี้วัดนี้" />
-        )}
+        <BodyMetricChart points={chart.points} unit={chart.unit} />
       </section>
       <label>
         เลือกท่าดูกราฟ
@@ -167,8 +135,8 @@ export default function Progress() {
             >
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
               <XAxis dataKey="week" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} domain={[0, (max: number) => Math.max(150, max)]} />
-              <ReferenceLine y={150} stroke="#476c4c" strokeDasharray="5 4" label="เป้า 150" />
+              <YAxis tick={{ fontSize: 11 }} domain={[0, (max: number) => Math.max(goal, max)]} />
+              <ReferenceLine y={goal} stroke="#476c4c" strokeDasharray="5 4" label={`เป้า ${goal}`} />
               <Tooltip />
               <Bar
                 name="นาที"
@@ -180,6 +148,23 @@ export default function Progress() {
           </ResponsiveContainer>
         </div>
       </section>
+      <TrainingCalendar entries={entries} />
+      <section className="panel">
+        <h2>Insights</h2>
+        <div className="metric-card-grid">
+          {progressMetrics.map((item) => (
+            <button type="button" key={item.key} className={`metric-card metric-status ${item.assessment?.tone ?? ""}`}
+              onClick={() => setDetail(item)}>
+              <span>{item.label}<ChevronRight size={15} aria-hidden="true" /></span>
+              <strong>{item.latest ? `${item.latest.value} ${item.unit}` : "—"}</strong>
+              {item.latest && <small>{dateLabel(item.latest.date)}</small>}
+              {item.assessment && <small>{item.assessment.label}</small>}
+            </button>
+          ))}
+        </div>
+      </section>
+      <BodyProfile bodies={bodies} reports={reports} openMetric={setDetail} height={height} />
+      {detail && <BodyMetricDialog detail={detail} close={() => setDetail(null)} />}
       {bodyForm && <BodyForm close={() => setBodyForm(null)} />}
     </>
   );

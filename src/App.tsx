@@ -96,6 +96,7 @@ import { planSessionMove, type MachineMove } from "./migration";
 import { recoverFormDraft } from "./formDraft";
 import { exerciseDemoLink, exerciseGuide, exerciseGuideFrames, homeCoachRoutine, homeGym, homeMoves, isObsoleteHomeRoutine } from "./homeTraining";
 import { reportUrl } from "./bodyDetails";
+import { cardioMix } from "./cardioMix";
 type Context = {
   entries: Entry[];
   refresh: () => Promise<void>;
@@ -2218,7 +2219,6 @@ function CardioPage({ openReport = false }: { openReport?: boolean }) {
     [date, setDate] = useState(today()),
     [reportWeek, setReportWeek] = useState(weekOf(today())),
     [withWeights, setWithWeights] = useState(true),
-    [walking, setWalking] = useState(false),
     [editId, setEditId] = useRememberedView("cardio-edit"),
     [copy, setCopy] = useState(openReport);
   const week = storedWeek ?? weekOf(today());
@@ -2241,15 +2241,14 @@ function CardioPage({ openReport = false }: { openReport?: boolean }) {
   };
   const settings =
       entries.find((e) => e.id === "settings-main" && !e.deleted)?.data ?? {},
-    goal = walking ? (settings.walkGoal ?? 150) : (settings.cardioGoal ?? 150),
-    totals = cardioTotals(entries, week, walking);
+    goal = settings.cardioGoal ?? 150,
+    totals = cardioTotals(entries, week);
   const logs = entries
     .filter(
       (e) =>
         e.kind === "cardio" &&
         !e.deleted &&
-        e.data.week === week &&
-        (!walking || e.data.walkGoal),
+        e.data.week === week,
     )
     .sort((a, b) => b.data.date.localeCompare(a.data.date));
   const message = coachMessage(
@@ -2257,9 +2256,10 @@ function CardioPage({ openReport = false }: { openReport?: boolean }) {
     date,
     reportWeek,
     goal,
-    walking,
+    false,
     withWeights,
   );
+  const mix = cardioMix(logs);
   return (
     <>
       <Header title="Cardio" subtitle="รอบสัปดาห์อาทิตย์–เสาร์ · เวลาไทย">
@@ -2269,20 +2269,6 @@ function CardioPage({ openReport = false }: { openReport?: boolean }) {
         </button>
       </Header>
       <div className="toolbar">
-        <div className="segmented">
-          <button
-            className={!walking ? "active" : ""}
-            onClick={() => setWalking(false)}
-          >
-            คาร์ดิโอทั้งหมด
-          </button>
-          <button
-            className={walking ? "active" : ""}
-            onClick={() => setWalking(true)}
-          >
-            เฉพาะเป้าเดิน
-          </button>
-        </div>
         <div className="week-select">
           <button
             className="icon"
@@ -2306,7 +2292,7 @@ function CardioPage({ openReport = false }: { openReport?: boolean }) {
       <div className="cardio-grid">
         <section className="hero">
           <div className="eyebrow light">
-            {walking ? "เดินสะสม" : "คาร์ดิโอสะสม"} ·{" "}
+            คาร์ดิโอสะสม ·{" "}
             {weekOf(today()) === week ? "สัปดาห์นี้ · " : ""}
             {dateLabel(week)} – {dateLabel(addDays(week, 6))}
           </div>
@@ -2320,8 +2306,18 @@ function CardioPage({ openReport = false }: { openReport?: boolean }) {
                 จากเป้าหมาย {goal} นาที · {totals.count} รายการ
               </p>
             </div>
-            <Ring value={(totals.seconds / (goal * 60)) * 100} />
+            <div className="ring cardio-mix-ring" style={{ background: mix.background }} aria-hidden="true">
+              <div><strong>{Math.floor(mix.total / 60)}</strong><span>นาทีรวม</span></div>
+            </div>
           </div>
+          <dl className="cardio-mix-legend">
+            {mix.groups.map(({ label, color, seconds }) => (
+              <div key={label}>
+                <dt><span style={{ background: color }} aria-hidden="true" />{label}</dt>
+                <dd>{duration(seconds)}</dd>
+              </div>
+            ))}
+          </dl>
           <div className="hero-bottom">
             <span>
               <Target size={16} />
@@ -2398,8 +2394,7 @@ function CardioPage({ openReport = false }: { openReport?: boolean }) {
         />
       )}
       <div className="notice">
-        รายการ “รอตรวจ” ยังไม่นับยอด · ต่อยมวยและกิจกรรมอื่นรวมในคาร์ดิโอทั้งหมด
-        แต่ไม่รวมเป้าเดินโดยอัตโนมัติ
+        วงกลมและยอดรวมใช้เฉพาะรายการที่ยืนยันแล้วตามสัปดาห์ที่เลือกให้นับ
       </div>
       {edit !== undefined && (
         <CardioForm
