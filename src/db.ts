@@ -26,6 +26,15 @@ export async function getEntry(id: string): Promise<Entry | undefined> {
 export async function putEntry(e: Entry) {
   await (await db).put("entries", e);
 }
+export async function addMissingMachines(machines: Array<{ id: string; data: import("./types").Machine }>) {
+  const tx = (await db).transaction("entries", "readwrite");
+  const existing = new Set(await tx.store.getAllKeys());
+  const missing: Entry[] = machines.filter((machine) => !existing.has(machine.id)).map(({ id, data }) => ({
+    id, data, kind: "machine", updatedAt: new Date().toISOString(), dirty: true, version: 0,
+  }));
+  missing.forEach(validateEntry);
+  await Promise.all([...missing.map((machine) => tx.store.add(machine)), tx.done]);
+}
 export async function moveMachinePhoto(photoId: string, from: string, to: string) {
   if (from === to) return;
   const tx = (await db).transaction("entries", "readwrite");

@@ -1,7 +1,7 @@
 import type { Machine } from "./types";
 
 export const homeGym = "ที่บ้าน";
-export const homeRoutineId = "routine-home-full-body";
+export const retiredHomeRoutineId = "routine-home-full-body";
 export const homeMoves = [
   { id: "home-goblet-squat", name: "Goblet Squat", thai: "สควอตถือเคตเทิลเบล", group: "ขา", loadMode: "total",
     setup: "เคตเทิลเบล 5 กก. หนึ่งลูก หรือเริ่มซ้อมโดยไม่ถือ",
@@ -18,6 +18,9 @@ export const homeMoves = [
   { id: "home-dead-bug", name: "Dead Bug", thai: "เหยียดแขนขาสลับข้าง", group: "แกนกลาง", loadMode: "bodyweight",
     setup: "พื้นราบ ใช้น้ำหนักตัว · นับจำนวนครั้งรวมสองข้าง",
     cues: "นอนหงายยกแขนและงอสะโพกกับเข่า ค่อย ๆ เหยียดแขนและขาฝั่งตรงข้าม คุมเอวให้นิ่ง แล้วสลับข้าง" },
+  { id: "home-chair-squat", name: "Chair Squat", thai: "ลุกนั่งจากเก้าอี้", group: "ขา", loadMode: "bodyweight",
+    setup: "ใช้เก้าอี้มั่นคง วางชิดผนังได้",
+    cues: "วางเท้าราบ ดันสะโพกไปด้านหลัง แตะที่นั่งเบา ๆ แล้วกดเท้ายืนขึ้นโดยคุมเข่าไปทางเดียวกับปลายเท้า" },
 ] satisfies Array<Pick<Machine, "name" | "thai" | "group" | "loadMode" | "setup" | "cues"> & { id: string }>;
 
 const guides: Record<string, string> = {
@@ -26,6 +29,7 @@ const guides: Record<string, string> = {
   "bent over two-dumbbell row": "Bent_Over_Two-Dumbbell_Row",
   "glute bridge": "Butt_Lift_Bridge",
   "dead bug": "Dead_Bug",
+  "chair squat": "Chair_Squat",
   "chest press": "Machine_Bench_Press",
   "lat pulldown": "Wide-Grip_Lat_Pulldown",
   "leg press": "Leg_Press",

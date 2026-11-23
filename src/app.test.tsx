@@ -25,14 +25,14 @@ afterEach(() => {
   location.hash = "";
   localStorage.clear();
 });
-it("installs the home routine and opens a home session with five exercises", async () => {
+it("shows individual home exercise cards under the home filter", async () => {
+  location.hash = "#machines";
   render(<App />);
-  fireEvent.click(await screen.findByText("โปรแกรมที่บ้าน · เวททั้งตัว"));
-  fireEvent.click(screen.getByRole("button", { name: "เพิ่มโปรแกรมที่บ้าน" }));
-  fireEvent.click(await screen.findByRole("button", { name: /ที่บ้าน · เวททั้งตัว 5 ท่า/ }));
-  const dialog = await topDialog();
-  expect(dialog.getByLabelText("ยิมที่ฝึก")).toHaveProperty("value", "ที่บ้าน");
-  expect(dialog.getAllByRole("checkbox", { checked: true })).toHaveLength(5);
+  fireEvent.change(await screen.findByLabelText("ฟิตเนส"), { target: { value: "ที่บ้าน" } });
+  expect(await screen.findByRole("heading", { name: "Chair Squat" })).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Goblet Squat" })).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Dead Bug" })).toBeTruthy();
+  expect(screen.queryByText("โปรแกรมที่บ้าน · เวททั้งตัว")).toBeNull();
 });
 it("keeps both seed and added photos when changing the main photo and recovers a previously hidden seed photo", async () => {
   const id = "we-photo-regression";

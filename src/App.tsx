@@ -62,6 +62,7 @@ import {
   mergeExerciseGroups,
   moveReviewedSession,
   moveMachinePhoto,
+  addMissingMachines,
 } from "./db";
 import {
   today,
@@ -92,8 +93,8 @@ import ExerciseChart from "./ExerciseChart";
 import { gymCatalogId, gymName, gymsFor, type Gym } from "./gyms";
 import { planSessionMove, type MachineMove } from "./migration";
 import { recoverFormDraft } from "./formDraft";
-import { ExerciseIllustration, HomeRoutineSetup } from "./HomeRoutine";
-import { exerciseGuide, homeGym } from "./homeTraining";
+import { ExerciseIllustration } from "./HomeRoutine";
+import { exerciseGuide, homeGym, homeMoves, retiredHomeRoutineId } from "./homeTraining";
 type Context = {
   entries: Entry[];
   refresh: () => Promise<void>;
@@ -557,14 +558,13 @@ export default function App() {
   }, [cloudUrl, pending]);
   const tabs = [
     ["today", "วันนี้", LayoutDashboard],
-    ["machines", "เครื่องและท่า", Dumbbell],
+    ["machines", "เวท", Dumbbell],
     ["cardio", "คาร์ดิโอ", Footprints],
     ["progress", "ความก้าวหน้า", TrendingUp],
     ["history", "ประวัติ", History],
     ["settings", "ตั้งค่า", Settings],
   ] as const;
   const short: Record<string, string> = {
-    machines: "เครื่อง",
     progress: "สถิติ",
   };
   return (
@@ -748,8 +748,8 @@ function Today({ nav }: { nav: (p: string) => void }) {
     draft = active
       .filter((e) => e.kind === "session" && e.data.status === "draft")
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0],
-    routines = active.filter((e) => e.kind === "routine"),
-    machines = active.filter((e) => e.kind === "machine" && !e.data.archived),
+    routines = active.filter((e) => e.kind === "routine" && e.id !== retiredHomeRoutineId),
+    machines = active.filter((e) => e.kind === "machine" && !e.data.archived && e.data.gym !== homeGym),
     last = active
       .filter(
         (e) => e.data.date && (e.kind === "cardio" || (e.kind === "session" && e.data.status !== "draft")),
@@ -809,7 +809,6 @@ function Today({ nav }: { nav: (p: string) => void }) {
           ) : (
             <>
               <p className="muted">เลือกโปรแกรมเพื่อเริ่มบันทึก หรือเลือกเครื่องเอง</p>
-              <HomeRoutineSetup />
               <div className="routine-buttons">
                 {routines.map((r) => (
                   <button
@@ -887,7 +886,7 @@ function Today({ nav }: { nav: (p: string) => void }) {
         />
       </div>
       <div className="section-title">
-        <h2>เครื่องและท่า</h2>
+        <h2>เวท</h2>
         <button className="text-button" onClick={() => nav("machines")}>
           ทั้งหมด <ChevronRight size={17} />
         </button>
@@ -905,10 +904,10 @@ function Today({ nav }: { nav: (p: string) => void }) {
       </div>
       {!machines.length && (
         <Empty
-          text="ยังไม่มีเครื่อง เพิ่มเครื่องแรกได้ที่หน้าเครื่องและท่า"
+          text="ยังไม่มีท่า เพิ่มท่าแรกได้ที่หน้าเวท"
           action={
             <button className="secondary" onClick={() => nav("machines")}>
-              ไปที่เครื่องและท่า
+              ไปหน้าเวท
             </button>
           }
         />
@@ -1156,7 +1155,7 @@ function RoutineSettings() {
   const { entries, run } = useData(),
     [edit, setEdit] = useState<Entry | null | undefined>(undefined),
     [selected, setSelected] = useState<string[]>([]);
-  const routines = entries.filter((e) => e.kind === "routine" && !e.deleted),
+  const routines = entries.filter((e) => e.kind === "routine" && !e.deleted && e.id !== retiredHomeRoutineId),
     machines = entries.filter(
       (e) => e.kind === "machine" && !e.deleted && !e.data.archived,
     );
@@ -1347,7 +1346,7 @@ function MachineTile({ e, onClick, preferWe = true }: { e: Entry; onClick: () =>
   );
 }
 function Machines() {
-  const { entries } = useData(),
+  const { entries, run } = useData(),
     [query, setQuery] = useState(""),
     [gym, setGym] = useState(""),
     [group, setGroup] = useState("ทั้งหมด"),
@@ -1355,6 +1354,12 @@ function Machines() {
     [create, setCreate] = useState(false),
     [merge, setMerge] = useState(false),
     [showArchived, setShowArchived] = useState(false);
+  useEffect(() => {
+    if (homeMoves.every((move) => entries.some((entry) => entry.id === move.id))) return;
+    void run(() => addMissingMachines(homeMoves.map(({ id, ...data }) => ({
+      id, data: { ...data, gym: homeGym },
+    }))));
+  }, []);
   const machines = entries.filter(
     (e) =>
       e.kind === "machine" &&
@@ -1368,7 +1373,7 @@ function Machines() {
   );
   return (
     <>
-      <Header title="เครื่องและท่า" subtitle="รูปเครื่อง การตั้งเบาะ และผลครั้งก่อน">
+      <Header title="เวท" subtitle="ท่าที่บ้านและเครื่องแต่ละยิม พร้อมวิธีเล่นและผลครั้งก่อน">
         <button className="secondary" onClick={() => setMerge(true)}>รวมท่า</button>
         <button className="primary" onClick={() => setCreate(true)}>
           <Plus size={18} />
@@ -1972,7 +1977,7 @@ function StartSession({
   });
   const machines = allMachines.filter((e) => e.data.gym === gym);
   const selectedMachines = selection.filter((id) => machines.some((m) => m.id === id));
-  const routines = entries.filter((e) => e.kind === "routine" && !e.deleted);
+  const routines = entries.filter((e) => e.kind === "routine" && !e.deleted && e.id !== retiredHomeRoutineId);
   return (
     <Modal title="เริ่มฝึก" close={close}>
       <div className="form">
@@ -3596,7 +3601,6 @@ function SettingsPage({
         </p>
       </section>
       <RoutineSettings />
-      <HomeRoutineSetup />
       <GymSettings />
       <ReviewedSessionMigration />
       <RestShortcutSettings />
