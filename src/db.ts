@@ -3,7 +3,7 @@ import type { Entry, Kind, Session } from "./types";
 import { validateEntry } from "./validation";
 import { exerciseKey, today } from "./core";
 import { planSessionMove, type MachineMove } from "./migration";
-import { exerciseGuideFrames } from "./homeTraining";
+import { exerciseGuideFrames, homeCoachRoutine, homeGym, homeMoves } from "./homeTraining";
 const loadZip = () => import("jszip").then((m) => m.default);
 export const sandbox =
   typeof location !== "undefined" &&
@@ -50,14 +50,18 @@ export async function addBundledMachinePhotos(machineId: string, name: string, g
   }
   await tx.done;
 }
-export async function addMissingMachines(machines: Array<{ id: string; data: import("./types").Machine }>) {
+export async function addMissingHomeTraining() {
   const tx = (await db).transaction("entries", "readwrite");
   const existing = new Set(await tx.store.getAllKeys());
-  const missing: Entry[] = machines.filter((machine) => !existing.has(machine.id)).map(({ id, data }) => ({
-    id, data, kind: "machine", updatedAt: new Date().toISOString(), dirty: true, version: 0,
-  }));
+  const defaults = [
+    ...homeMoves.map(({ id, ...data }) => ({ id, kind: "machine" as const, data: { ...data, gym: homeGym } })),
+    { ...homeCoachRoutine, kind: "routine" as const },
+  ];
+  const updatedAt = new Date().toISOString();
+  const missing: Entry[] = defaults.filter(({ id }) => !existing.has(id))
+    .map((entry) => ({ ...entry, updatedAt, dirty: true, version: 0 }));
   missing.forEach(validateEntry);
-  await Promise.all([...missing.map((machine) => tx.store.add(machine)), tx.done]);
+  await Promise.all([...missing.map((entry) => tx.store.add(entry)), tx.done]);
 }
 export async function moveMachinePhoto(photoId: string, from: string, to: string) {
   if (from === to) return;

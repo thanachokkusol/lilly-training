@@ -53,6 +53,21 @@ export const homeMoves = [
   { id: "home-db-kickback", name: "Dumbbell Triceps Kickback", thai: "เหยียดแขนดัมเบลไปด้านหลัง", group: "แขน", loadMode: "total",
     setup: "ดัมเบลหนึ่งลูก ทำทีละข้าง · บันทึกเซ็ตตามจำนวนครั้งที่ทำจริง",
     cues: "พับสะโพกและพยุงตัวให้มั่น คงต้นแขนชิดลำตัว เหยียดข้อศอกให้มือไปด้านหลัง แล้วค่อยงอกลับ" },
+  { id: "home-db-concentration-curl", name: "Dumbbell Concentration Curl", thai: "นั่งงอแขนดัมเบลพิงต้นขา", group: "แขน", loadMode: "total",
+    setup: "เก้าอี้มั่นคงและดัมเบลหนึ่งลูก ทำทีละข้าง",
+    cues: "นั่งเท้าราบ พิงต้นแขนด้านในต้นขา หงายมือ งอศอกให้ดัมเบลขึ้นโดยคงต้นแขนไว้ แล้วลดลงช้า ๆ" },
+  { id: "home-db-reverse-curl", name: "Dumbbell Reverse Curl", thai: "งอแขนดัมเบลคว่ำมือ", group: "แขน", loadMode: "per-side",
+    setup: dumbbellPair,
+    cues: "คว่ำมือถือดัมเบลหน้าต้นขา เก็บศอกข้างตัว งอศอกโดยรักษาข้อมือตรง แล้วลดลงช้า ๆ" },
+  { id: "home-db-lying-extension", name: "Lying Dumbbell Triceps Extension", thai: "นอนเหยียดแขนดัมเบล", group: "แขน", loadMode: "per-side",
+    setup: dumbbellPair + " · ใช้พื้นราบ",
+    cues: "นอนหงาย เท้าราบ ยกดัมเบลเหนือไหล่ ฝ่ามือเข้าหากัน คงต้นแขนไว้ งอศอกให้ลูกลงข้างศีรษะ แล้วเหยียดขึ้นช้า ๆ" },
+  { id: "home-crunch", name: "Crunch", thai: "ครันช์บนพื้น", group: "แกนกลาง", loadMode: "bodyweight",
+    setup: "พื้นราบ ใช้น้ำหนักตัว",
+    cues: "นอนหงาย งอเข่า เท้าราบ หายใจออกขณะเกร็งท้องยกสะบักจากพื้นเล็กน้อย แล้วลดลงช้า ๆ โดยไม่ดึงคอ" },
+  { id: "home-side-hip-abduction", name: "Side-Lying Hip Abduction", thai: "นอนตะแคงยกขาด้านข้าง", group: "ขา", loadMode: "bodyweight",
+    setup: "พื้นราบ ใช้น้ำหนักตัว ทำทั้งสองข้าง",
+    cues: "นอนตะแคงให้สะโพกซ้อนกัน เหยียดขาบน ยกขาขึ้นด้านข้างโดยไม่หมุนสะโพกหรือหงายปลายเท้า แล้วลดลงช้า ๆ" },
   { id: "home-db-lateral-raise", name: "Dumbbell Lateral Raise", thai: "ยกดัมเบลออกด้านข้าง", group: "ไหล่", loadMode: "per-side",
     setup: dumbbellPair,
     cues: "งอศอกเล็กน้อย ยกแขนออกด้านข้างเท่าที่คุมได้ประมาณระดับไหล่ แล้วลดช้า ๆ โดยไม่เหวี่ยงตัว" },
@@ -60,6 +75,16 @@ export const homeMoves = [
     setup: dumbbellPair,
     cues: "เริ่มดัมเบลที่ไหล่ เกร็งลำตัว ดันขึ้นให้แขนอยู่เหนือไหล่โดยไม่แอ่นเอว แล้วลดกลับอย่างคุมได้" },
 ] satisfies Array<Pick<Machine, "name" | "thai" | "group" | "loadMode" | "setup" | "cues"> & { id: string }>;
+
+export const homeCoachRoutine = {
+  id: "routine-home-coach",
+  data: {
+    title: "Coach Plan · Home",
+    machineIds: ["home-floor-press", "home-dumbbell-row", "home-db-kickback", "home-goblet-squat", "home-side-hip-abduction", "home-crunch"],
+    days: [],
+    note: "ดัดแปลงจากบันทึก WE Upper / Lower: Floor Press แทน Chest Press, Dumbbell Row ใช้ฝึกกล้ามเนื้อหลังแทน Lat Pulldown และ Seated Row, Kickback แทน Cable Pushdown, Goblet Squat แทน Leg Press, Side-Lying Hip Abduction แทนเครื่องกางขา และ Crunch แทนเครื่องหน้าท้อง\nบันทึกโค้ช: เน้นฟอร์ม 3 เซต × 8–12 ครั้ง ไม่นับวอร์ม · สำหรับ Cable Pushdown โค้ชระบุ 2 เซต × 10–12 ครั้ง ใช้เป็นแนวทางสำหรับ Kickback ที่บ้าน",
+  },
+};
 
 const guides: Record<string, string> = {
   "goblet squat": "Goblet_Squat",
@@ -77,6 +102,11 @@ const guides: Record<string, string> = {
   "hammer curl": "Hammer_Curls",
   "overhead dumbbell triceps extension": "Standing_Dumbbell_Triceps_Extension",
   "dumbbell triceps kickback": "Tricep_Dumbbell_Kickback",
+  "dumbbell concentration curl": "Concentration_Curls",
+  "dumbbell reverse curl": "Standing_Dumbbell_Reverse_Curl",
+  "lying dumbbell triceps extension": "Lying_Dumbbell_Tricep_Extension",
+  "crunch": "Crunches",
+  "side-lying hip abduction": "Side_Lying_Leg_Raise",
   "dumbbell lateral raise": "Side_Lateral_Raise",
   "standing dumbbell shoulder press": "Standing_Dumbbell_Press",
   "kettlebell sumo high pull": "Kettlebell_Sumo_High_Pull",

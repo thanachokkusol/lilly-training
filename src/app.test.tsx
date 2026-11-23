@@ -31,6 +31,9 @@ it.each([
   ["Kettlebell Upright Row", "home-kb-upright-row", 1],
   ["Push-up", "home-push-up", 2],
   ["Forward Lunge", "home-forward-lunge", 2],
+  ["Dumbbell Concentration Curl", "home-db-concentration-curl", 2],
+  ["Dumbbell Reverse Curl", "home-db-reverse-curl", 2],
+  ["Lying Dumbbell Triceps Extension", "home-db-lying-extension", 2],
 ] as const)("shows %s under the home filter with editable photos", async (name, id, frameCount) => {
   location.hash = "#machines";
   render(<App />);
@@ -65,6 +68,15 @@ it.each([
     else Reflect.deleteProperty(URL, "createObjectURL");
     Reflect.deleteProperty(URL, "revokeObjectURL");
   }
+});
+it("opens the adapted coach plan with the home gym and all six exercises selected", async () => {
+  location.hash = "#today";
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Coach Plan · Home/ }));
+  const dialog = await topDialog();
+  expect((dialog.getByLabelText("ยิมที่ฝึก") as HTMLSelectElement).value).toBe("ที่บ้าน");
+  expect(dialog.getByText(/ดัดแปลงจากบันทึก WE Upper/)).toBeTruthy();
+  expect((dialog.getByRole("button", { name: /เริ่มบันทึก 6 ท่า/ }) as HTMLButtonElement).disabled).toBe(false);
 });
 it("keeps both seed and added photos when changing the main photo and recovers a previously hidden seed photo", async () => {
   const id = "we-photo-regression";

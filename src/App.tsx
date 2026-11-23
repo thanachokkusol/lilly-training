@@ -62,7 +62,7 @@ import {
   mergeExerciseGroups,
   moveReviewedSession,
   moveMachinePhoto,
-  addMissingMachines,
+  addMissingHomeTraining,
   addBundledMachinePhotos,
 } from "./db";
 import {
@@ -94,7 +94,7 @@ import ExerciseChart from "./ExerciseChart";
 import { gymCatalogId, gymName, gymsFor, type Gym } from "./gyms";
 import { planSessionMove, type MachineMove } from "./migration";
 import { recoverFormDraft } from "./formDraft";
-import { exerciseDemoLink, exerciseGuide, exerciseGuideFrames, homeGym, homeMoves, retiredHomeRoutineId } from "./homeTraining";
+import { exerciseDemoLink, exerciseGuide, exerciseGuideFrames, homeCoachRoutine, homeGym, homeMoves, retiredHomeRoutineId } from "./homeTraining";
 type Context = {
   entries: Entry[];
   refresh: () => Promise<void>;
@@ -541,6 +541,15 @@ export default function App() {
   }, [page]);
   const pending = entries.filter((e) => e.dirty).length;
   const canSync = Boolean(cloudUrl && authUser && authUser !== "local");
+  const cachedOwner = localStorage.getItem("lilly-owner");
+  const locked = cloudUrl && (!authUser || localStorage.getItem("lilly-locked") === "true" ||
+    (cachedOwner && cachedOwner !== authUser));
+  const ready = loaded && (!canSync || !online || initialSync === authUser);
+  const needsHomeTraining = [homeCoachRoutine, ...homeMoves].some(({ id }) =>
+    !entries.some((entry) => entry.id === id));
+  useEffect(() => {
+    if (ready && !locked && needsHomeTraining) void run(addMissingHomeTraining);
+  }, [ready, locked, needsHomeTraining]);
   const hasPushable = entries.some((e) => e.dirty && !e.conflict);
   useEffect(() => {
     if (!canSync || !online || !hasPushable) return;
@@ -625,11 +634,7 @@ export default function App() {
             {sandbox && (
               <div className="notice">พื้นที่ทดสอบ · ข้อมูลแยกจากสมุดจริง</div>
             )}
-            {cloudUrl &&
-            (!authUser ||
-              localStorage.getItem("lilly-locked") === "true" ||
-              (localStorage.getItem("lilly-owner") &&
-                localStorage.getItem("lilly-owner") !== authUser)) ? (
+            {locked ? (
               <Empty
                 text={
                   authUser === null
@@ -650,7 +655,7 @@ export default function App() {
                   </div>
                 }
               />
-            ) : !loaded || (canSync && online && initialSync !== authUser) ? (
+            ) : !ready ? (
               <Empty text="กำลังเปิดสมุดฝึก…" />
             ) : page === "today" ? (
               <Today nav={nav} />
@@ -944,6 +949,7 @@ function Today({ nav }: { nav: (p: string) => void }) {
         <StartSession
           initial={routine?.data.machineIds}
           initialTitle={routine?.data.title}
+          initialNote={routine?.data.note}
           close={() => { setStart(false); setRoutine(null); }}
           done={(id) => {
             setStart(false);
@@ -1351,12 +1357,6 @@ function Machines() {
     [create, setCreate] = useState(false),
     [merge, setMerge] = useState(false),
     [showArchived, setShowArchived] = useState(false);
-  useEffect(() => {
-    if (homeMoves.every((move) => entries.some((entry) => entry.id === move.id))) return;
-    void run(() => addMissingMachines(homeMoves.map(({ id, ...data }) => ({
-      id, data: { ...data, gym: homeGym },
-    }))));
-  }, []);
   const machines = entries.filter(
     (e) =>
       e.kind === "machine" &&
@@ -1964,15 +1964,18 @@ function StartSession({
   done,
   initial = [],
   initialTitle,
+  initialNote,
 }: {
   close: () => void;
   done: (id: string) => void;
   initial?: string[];
   initialTitle?: string;
+  initialNote?: string;
 }) {
   const { entries, run, refresh } = useData(),
     [selection, setSelection] = useState(initial),
     [title, setTitle] = useState(initialTitle ?? (initial.length ? "ฝึกเวท" : "Upper Body")),
+    [routineNote, setRoutineNote] = useState(initialNote ?? ""),
     [date, setDate] = useState(today());
   const allMachines = entries.filter(
       (e) => e.kind === "machine" && !e.deleted && !e.data.archived,
@@ -2018,6 +2021,7 @@ function StartSession({
               key={t}
               onClick={() => {
                 setTitle(t);
+                setRoutineNote("");
                 setSelection(
                   machines
                     .filter(
@@ -2041,17 +2045,21 @@ function StartSession({
               key={r.id}
               onClick={() => {
                 setTitle(r.data.title);
-                setSelection(
-                  r.data.machineIds.filter((id: string) =>
-                    machines.some((m) => m.id === id),
-                  ),
-                );
+                setRoutineNote(r.data.note ?? "");
+                const routineMachines = allMachines.filter((machine) =>
+                  r.data.machineIds.includes(machine.id) && gyms.some((item) => item.id === machine.data.gym));
+                const routineGym = routineMachines.find((machine) => machine.data.gym === gym)?.data.gym ??
+                  routineMachines[0]?.data.gym;
+                if (routineGym) setGym(routineGym);
+                setSelection(r.data.machineIds.filter((id: string) =>
+                  routineMachines.some((machine) => machine.id === id && machine.data.gym === routineGym)));
               }}
             >
               {r.data.title}
             </button>
           ))}
         </div>
+        {routineNote && <p className="notice preserve">{routineNote}</p>}
         <p>เลือกท่าตามลำดับที่จะเล่น</p>
         {machines.map((e) => (
           <label className="select-row" key={e.id}>
