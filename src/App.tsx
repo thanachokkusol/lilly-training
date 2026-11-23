@@ -91,6 +91,7 @@ const Progress = lazy(() => import("./Progress"));
 import ExerciseChart from "./ExerciseChart";
 import { gymCatalogId, gymName, gymsFor, type Gym } from "./gyms";
 import { planSessionMove, type MachineMove } from "./migration";
+import { recoverFormDraft } from "./formDraft";
 type Context = {
   entries: Entry[];
   refresh: () => Promise<void>;
@@ -2981,10 +2982,8 @@ function useFormDraft(kind: "body" | "cardio", entry?: Entry) {
   const [initial, setInitial] = useState<Record<string, string>>(() => {
     try {
       const cached = JSON.parse(localStorage.getItem(key) ?? "null");
-      const remote = cloudEnabled ? entries.find((e) => e.id === recordId && !e.deleted)?.data : null;
-      const saved = [cached, remote].filter((draft) => draft?.version === version)
-        .sort((a, b) => (b.at ?? 0) - (a.at ?? 0))[0];
-      return saved?.fields ?? {};
+      const remote = cloudEnabled ? entries.find((e) => e.id === recordId) : undefined;
+      return recoverFormDraft(cached?.fields ? { ...cached, at: cached.at ?? 0 } : null, remote, version);
     } catch {
       return {};
     }
