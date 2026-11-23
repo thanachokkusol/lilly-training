@@ -122,16 +122,15 @@ function exerciseFor(machine: Entry, entries: Entry[] = [], date = today(), sess
   const last = latestExercise(entries, machine.id, date, sessionId)?.exercise;
   const comparable = last && (last.loadMode === m.loadMode ||
     (["total", "per-side"].includes(last.loadMode) && ["total", "per-side"].includes(m.loadMode)));
-  const previous = comparable && !last.reportedOnly
-    ? last.sets.filter((set) => set.done)
-    : [];
+  const previous = comparable ? last.sets.filter((set) => set.done && !set.warmup) : [];
+  const suggestedSets = last?.reportedOnly ? previous.slice(0, 1) : previous;
   return {
     machineId: machine.id,
     setup: m.setup,
     loadMode: m.loadMode,
     note: "",
-    sets: previous.length
-      ? previous.map((set) => ({
+    sets: suggestedSets.length
+      ? suggestedSets.map((set) => ({
           ...set, id: uid(), done: false,
           load: totalLoad(set, last!.loadMode),
           enteredAs: set.enteredAs ?? (last!.loadMode === "per-side" ? "perSide" : "total"),
