@@ -1138,7 +1138,7 @@ function MachinePicker({
               <span>
                 {e.data.name}
                 <small>
-                  {gymName(entries, e.data.gym)} · {e.data.thai}
+                  {[gymName(entries, e.data.gym), e.data.label, e.data.thai].filter(Boolean).join(" · ")}
                 </small>
               </span>
               <Plus size={17} />
@@ -2043,7 +2043,7 @@ function StartSession({
             <span>
               {e.data.name}
               <small>
-                {gymName(entries, e.data.gym)} · {e.data.thai}
+                {[gymName(entries, e.data.gym), e.data.label, e.data.thai].filter(Boolean).join(" · ")}
               </small>
             </span>
             {selection.includes(e.id) && <b>{selection.indexOf(e.id) + 1}</b>}
