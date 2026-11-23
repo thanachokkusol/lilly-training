@@ -3166,7 +3166,8 @@ function HistoryPage() {
       const result = done.map((set) => formatSet(set, exercise.loadMode)).join(" / ");
       return [name && session.exercises.length > 1 ? `${name}: ${result}` : result];
     });
-    return [...sessionGyms(entries, session).map((id) => gymName(entries, id)), ...(sets.length ? sets : [session.summary])]
+    const venues = sessionGyms(entries, session).map((id) => gymName(entries, id));
+    return [...(venues.length ? venues : ["ไม่ระบุยิม"]), ...(sets.length ? sets : [session.summary])]
       .filter(Boolean).join(" · ");
   };
   const rows = entries
