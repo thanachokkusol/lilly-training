@@ -92,6 +92,8 @@ import ExerciseChart from "./ExerciseChart";
 import { gymCatalogId, gymName, gymsFor, type Gym } from "./gyms";
 import { planSessionMove, type MachineMove } from "./migration";
 import { recoverFormDraft } from "./formDraft";
+import { ExerciseIllustration, HomeRoutineSetup } from "./HomeRoutine";
+import { exerciseGuide, homeGym } from "./homeTraining";
 type Context = {
   entries: Entry[];
   refresh: () => Promise<void>;
@@ -807,6 +809,7 @@ function Today({ nav }: { nav: (p: string) => void }) {
           ) : (
             <>
               <p className="muted">เลือกโปรแกรมเพื่อเริ่มบันทึก หรือเลือกเครื่องเอง</p>
+              <HomeRoutineSetup />
               <div className="routine-buttons">
                 {routines.map((r) => (
                   <button
@@ -1303,10 +1306,17 @@ function MachineTile({ e, onClick, preferWe = true }: { e: Entry; onClick: () =>
     last = latestExercise(entries, e.id, today());
   const preferred = preferWe && machineVariants(entries, m).find((x) => x.data.gym === "WE Fitness" && machinePhotoIds(entries, x.id, x.data).main);
   const cover = preferred || e;
+  const coverPhoto = machinePhotoIds(entries, cover.id, cover.data).main;
+  const homeGuide = cover.data.gym === homeGym ? exerciseGuide(m.name) : undefined;
   return (
     <button className="machine-tile" onClick={onClick}>
       <div className="machine-photo">
-        <Photo id={machinePhotoIds(entries, cover.id, cover.data).main} alt={m.name} />
+        {homeGuide && !coverPhoto ? (
+          <>
+            <img loading="lazy" src={`${import.meta.env.BASE_URL}exercise-guides/${homeGuide}/0.jpg`} alt={`ภาพประกอบ ${m.name}`} />
+            <span className="reference-label">ภาพสาธิต</span>
+          </>
+        ) : <Photo id={coverPhoto} alt={m.name} />}
         <span className="gym-label">{gymName(entries, cover.data.gym)}</span>
       </div>
       <div className="machine-copy">
@@ -1586,6 +1596,7 @@ function MachineDetail({ id, close, selectMachine }: {
         <div>
           <h4>วิธีเล่น</h4>
           <p className="preserve">{m.cues || "ยังไม่มีบันทึก"}</p>
+          <ExerciseIllustration name={m.name} />
         </div>
         <div>
           <h4>รูปเครื่อง</h4>
@@ -3585,6 +3596,7 @@ function SettingsPage({
         </p>
       </section>
       <RoutineSettings />
+      <HomeRoutineSetup />
       <GymSettings />
       <ReviewedSessionMigration />
       <RestShortcutSettings />

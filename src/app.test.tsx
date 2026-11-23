@@ -25,6 +25,15 @@ afterEach(() => {
   location.hash = "";
   localStorage.clear();
 });
+it("installs the home routine and opens a home session with five exercises", async () => {
+  render(<App />);
+  fireEvent.click(await screen.findByText("โปรแกรมที่บ้าน · เวททั้งตัว"));
+  fireEvent.click(screen.getByRole("button", { name: "เพิ่มโปรแกรมที่บ้าน" }));
+  fireEvent.click(await screen.findByRole("button", { name: /ที่บ้าน · เวททั้งตัว 5 ท่า/ }));
+  const dialog = await topDialog();
+  expect(dialog.getByLabelText("ยิมที่ฝึก")).toHaveProperty("value", "ที่บ้าน");
+  expect(dialog.getAllByRole("checkbox", { checked: true })).toHaveLength(5);
+});
 it("keeps both seed and added photos when changing the main photo and recovers a previously hidden seed photo", async () => {
   const id = "we-photo-regression";
   const originalId = `photo-${id}`;

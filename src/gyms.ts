@@ -7,6 +7,7 @@ const defaults: Gym[] = [
   { id: "WE Fitness", name: "WE Fitness", shortCode: "WE", archived: false },
   { id: "Jett", name: "Jett", shortCode: "J", archived: false },
   { id: "M Fitness", name: "M Fitness", shortCode: "M", archived: false },
+  { id: "ที่บ้าน", name: "ที่บ้าน", shortCode: "บ้าน", archived: false },
 ];
 
 export function gymsFor(entries: Entry[]): Gym[] {

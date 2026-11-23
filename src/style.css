@@ -1511,6 +1511,18 @@ summary {
   margin-left: auto;
   padding: 5px;
 }
+.home-routine { margin: 12px 0; }
+.home-routine p { margin: 8px 0; }
+.exercise-guide { margin-top: 12px; }
+.exercise-guide-frames {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0;
+}
+.exercise-guide-frames figure { margin: 0; }
+.exercise-guide-frames img { display: block; width: 100%; border-radius: 8px; }
+.exercise-guide-frames figcaption { padding-top: 4px; font-size: 12px; }
 @media (min-width: 1600px) {
   .content {
     padding-top: 50px;
