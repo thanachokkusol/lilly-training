@@ -147,7 +147,7 @@ it("shows remaining time until the full 150-minute goal is reached", async () =>
   );
   render(<App />);
   fireEvent.click(
-    (await screen.findAllByRole("button", { name: "คาร์ดิโอ" }))[0],
+    (await screen.findAllByRole("button", { name: "Cardio" }))[0],
   );
   expect(await screen.findByText("เหลือ 49 นาที 29 วินาที")).toBeTruthy();
 });

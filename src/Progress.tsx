@@ -58,7 +58,7 @@ export default function Progress() {
   return (
     <>
       <Header
-        title="ความก้าวหน้า"
+        title="Progress"
         subtitle="ผลวัดร่างกาย น้ำหนักรายเครื่อง และคาร์ดิโอรายสัปดาห์"
       >
         <button className="primary" onClick={() => setBodyForm("open")}>

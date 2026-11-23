@@ -557,16 +557,13 @@ export default function App() {
     return () => window.removeEventListener("beforeunload", warn);
   }, [cloudUrl, pending]);
   const tabs = [
-    ["today", "วันนี้", LayoutDashboard],
-    ["machines", "เวท", Dumbbell],
-    ["cardio", "คาร์ดิโอ", Footprints],
-    ["progress", "ความก้าวหน้า", TrendingUp],
-    ["history", "ประวัติ", History],
-    ["settings", "ตั้งค่า", Settings],
+    ["today", "Today", LayoutDashboard],
+    ["machines", "Strength", Dumbbell],
+    ["cardio", "Cardio", Footprints],
+    ["progress", "Progress", TrendingUp],
+    ["history", "History", History],
+    ["settings", "Settings", Settings],
   ] as const;
-  const short: Record<string, string> = {
-    progress: "สถิติ",
-  };
   return (
     <Data.Provider value={{ entries, refresh, run, notify }}>
       <div className="app">
@@ -688,7 +685,7 @@ export default function App() {
               >
                 <Icon size={20} />
                 <span className="long">{label}</span>
-                <span className="short">{short[key] ?? label}</span>
+                <span className="short">{label}</span>
               </button>
             ))}
         </nav>
@@ -763,7 +760,7 @@ function Today({ nav }: { nav: (p: string) => void }) {
   };
   return (
     <>
-      <Header title="วันนี้" subtitle={longDate(now)} />
+      <Header title="Today" subtitle={longDate(now)} />
       <div className="hero-grid">
         <section className="session-card">
           <div className="card-head">
@@ -886,7 +883,7 @@ function Today({ nav }: { nav: (p: string) => void }) {
         />
       </div>
       <div className="section-title">
-        <h2>เวท</h2>
+        <h2>Strength</h2>
         <button className="text-button" onClick={() => nav("machines")}>
           ทั้งหมด <ChevronRight size={17} />
         </button>
@@ -904,10 +901,10 @@ function Today({ nav }: { nav: (p: string) => void }) {
       </div>
       {!machines.length && (
         <Empty
-          text="ยังไม่มีท่า เพิ่มท่าแรกได้ที่หน้าเวท"
+          text="ยังไม่มีท่า เพิ่มท่าแรกได้ที่หน้า Strength"
           action={
             <button className="secondary" onClick={() => nav("machines")}>
-              ไปหน้าเวท
+              เปิด Strength
             </button>
           }
         />
@@ -1373,7 +1370,7 @@ function Machines() {
   );
   return (
     <>
-      <Header title="เวท" subtitle="ท่าที่บ้านและเครื่องแต่ละยิม พร้อมวิธีเล่นและผลครั้งก่อน">
+      <Header title="Strength">
         <button className="secondary" onClick={() => setMerge(true)}>รวมท่า</button>
         <button className="primary" onClick={() => setCreate(true)}>
           <Plus size={18} />
@@ -2254,7 +2251,7 @@ function CardioPage({ openReport = false }: { openReport?: boolean }) {
   );
   return (
     <>
-      <Header title="คาร์ดิโอ" subtitle="รอบสัปดาห์อาทิตย์–เสาร์ · เวลาไทย">
+      <Header title="Cardio" subtitle="รอบสัปดาห์อาทิตย์–เสาร์ · เวลาไทย">
         <button className="primary" onClick={() => setEdit(null)}>
           <Plus size={18} />
           บันทึกคาร์ดิโอ
@@ -3210,7 +3207,7 @@ function HistoryPage() {
     .sort((a, b) => (b.data.date || "").localeCompare(a.data.date || ""));
   return (
     <>
-      <Header title="ประวัติ" subtitle="เวท คาร์ดิโอ และผลวัด เรียงจากล่าสุด" />
+      <Header title="History" subtitle="เวท คาร์ดิโอ และผลวัด เรียงจากล่าสุด" />
       <div className="chips">
         {[
           ["all", "ทั้งหมด"],
@@ -3402,27 +3399,6 @@ function ConnectionRecovery() {
     </>
   );
 }
-function ArchiveItem({ e }: { e: Entry }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <details
-      className="archive-item"
-      onToggle={(ev) => setOpen((ev.target as HTMLDetailsElement).open)}
-    >
-      <summary>{e.data.title}</summary>
-      {open && (
-        <>
-          {e.data.photoId && (
-            <div className="archive-photo">
-              <Photo id={e.data.photoId} alt={e.data.title} />
-            </div>
-          )}
-          <pre className="archive-text">{e.data.text}</pre>
-        </>
-      )}
-    </details>
-  );
-}
 function GymSettings() {
   const { entries, run } = useData();
   const gyms = gymsFor(entries);
@@ -3549,7 +3525,7 @@ function SettingsPage({
   return (
     <>
       <Header
-        title="ตั้งค่า"
+        title="Settings"
         subtitle="การซิงก์ เป้าหมาย โปรแกรมฝึก และการสำรองข้อมูล"
       />
       <section className="panel">
@@ -3781,17 +3757,6 @@ function SettingsPage({
         {!entries.some((e) => e.deleted) && (
           <p className="muted">ไม่มีรายการในถังขยะ</p>
         )}
-      </section>
-      <section className="panel">
-        <h2>คลังข้อมูลเดิม</h2>
-        <p className="muted">
-          อาหาร แผนเก่า และโน้ตต้นฉบับ เก็บไว้อ้างอิง ไม่ถูกนับเป็นผลฝึกจริง
-        </p>
-        {entries
-          .filter((e) => e.kind === "archive" && !e.deleted)
-          .map((e) => (
-            <ArchiveItem key={e.id} e={e} />
-          ))}
       </section>
       {configOpen && (
         <Modal title="เชื่อม Supabase" close={() => setConfigOpen(false)}>
