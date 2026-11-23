@@ -2137,14 +2137,17 @@ function RestTimer({ sessionId }: { sessionId: string }) {
     const tick = () => setNow(Date.now());
     const t = setInterval(tick, 250);
     document.addEventListener("visibilitychange", tick);
+    window.addEventListener("pageshow", tick);
     return () => {
       clearInterval(t);
       document.removeEventListener("visibilitychange", tick);
+      window.removeEventListener("pageshow", tick);
     };
   }, [end]);
   return (
     <div className="rest-timer" data-state={!end ? "idle" : expired ? "expired" : seconds <= 10 ? "soon" : "running"}>
       <Timer size={17} />
+      <span className="sr-only" role="status">{expired ? "หมดเวลาพัก เริ่มเซ็ตถัดไปได้" : ""}</span>
       <span>
         {expired
           ? `หมดเวลาพัก — เริ่มเซ็ตถัดไป +${Math.floor(Math.abs(seconds) / 60)}:${(Math.abs(seconds) % 60).toString().padStart(2, "0")}`

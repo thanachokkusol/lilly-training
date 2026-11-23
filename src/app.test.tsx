@@ -143,6 +143,17 @@ it("starts a session, logs two sets in the focused machine view, and reopens the
     (await topDialog()).getByRole("button", { name: "เปิด Regression Machine" }),
   );
   expect(await screen.findByText("ดันช้า ๆ")).toBeTruthy();
+  const start = Date.now();
+  const clock = vi.spyOn(Date, "now").mockReturnValue(start);
+  try {
+    fireEvent.click(screen.getByRole("button", { name: "60วิ" }));
+    clock.mockReturnValue(start + 73_000);
+    fireEvent(window, new Event("pageshow"));
+    expect(screen.getByText(/หมดเวลาพัก.*\+0:13/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "ปิดตัวจับเวลา" }));
+  } finally {
+    clock.mockRestore();
+  }
   fireEvent.change(screen.getByRole("spinbutton", { name: "เซต 1 น้ำหนัก" }), {
     target: { value: "10" },
   });
