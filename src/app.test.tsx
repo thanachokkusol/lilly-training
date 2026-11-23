@@ -33,14 +33,31 @@ it("shows individual home exercise cards under the home filter", async () => {
   expect(screen.getByRole("heading", { name: "Goblet Squat" })).toBeTruthy();
   expect(screen.getByRole("heading", { name: "Dead Bug" })).toBeTruthy();
   expect(screen.queryByText("โปรแกรมที่บ้าน · เวททั้งตัว")).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: /Goblet Squat.*มีเครื่องที่/ }));
-  const dialog = await topDialog();
-  expect(dialog.getByRole("img", { name: "ภาพสาธิต Goblet Squat" })).toBeTruthy();
-  fireEvent.click(dialog.getByRole("button", { name: "ซ่อนภาพสาธิต" }));
-  await dialog.findByRole("button", { name: "แสดงภาพสาธิตอีกครั้ง" });
-  expect(dialog.queryByRole("img", { name: "ภาพสาธิต Goblet Squat" })).toBeNull();
-  fireEvent.click(dialog.getByRole("button", { name: "แสดงภาพสาธิตอีกครั้ง" }));
-  expect(await dialog.findByRole("img", { name: "ภาพสาธิต Goblet Squat" })).toBeTruthy();
+  const request = vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+    new Response(new Blob(["photo"], { type: "image/jpeg" })),
+  );
+  const objectUrl = Object.getOwnPropertyDescriptor(URL, "createObjectURL");
+  Object.defineProperty(URL, "createObjectURL", { configurable: true, value: () => "blob:test" });
+  Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: () => {} });
+  try {
+    fireEvent.click(screen.getByRole("button", { name: /Goblet Squat.*มีเครื่องที่/ }));
+    const dialog = await topDialog();
+    expect(await dialog.findByRole("button", { name: "รูปหลัก", exact: true })).toBeTruthy();
+    expect(dialog.getByRole("button", { name: "เปิดรูปเครื่อง" })).toBeTruthy();
+    fireEvent.click(dialog.getByRole("button", { name: "ลบรูปที่เปิด" }));
+    fireEvent.click(screen.getByRole("button", { name: "ยืนยันลบรูป" }));
+    await waitFor(async () => {
+      const photos = (await allEntries()).filter((entry) => entry.id.startsWith("guide-photo-home-goblet-squat-"));
+      expect(photos).toHaveLength(2);
+      expect(photos.filter((entry) => entry.deleted)).toHaveLength(1);
+    });
+    cleanup();
+  } finally {
+    request.mockRestore();
+    if (objectUrl) Object.defineProperty(URL, "createObjectURL", objectUrl);
+    else Reflect.deleteProperty(URL, "createObjectURL");
+    Reflect.deleteProperty(URL, "revokeObjectURL");
+  }
 });
 it("keeps both seed and added photos when changing the main photo and recovers a previously hidden seed photo", async () => {
   const id = "we-photo-regression";

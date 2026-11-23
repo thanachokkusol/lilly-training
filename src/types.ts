@@ -31,7 +31,6 @@ export interface Machine {
   loadMode: "per-side" | "total" | "assistance" | "bodyweight";
   photoId?: string;
   referencePhotoId?: string;
-  hideIllustration?: boolean;
   archived?: boolean;
 }
 export interface SetLog {

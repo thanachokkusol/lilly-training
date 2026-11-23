@@ -26,6 +26,29 @@ export async function getEntry(id: string): Promise<Entry | undefined> {
 export async function putEntry(e: Entry) {
   await (await db).put("entries", e);
 }
+export async function addBundledMachinePhotos(machineId: string, name: string, guide: string) {
+  const candidates = [0, 1].map((frame) => ({
+    id: `guide-photo-${machineId}-${frame}`,
+    url: `${import.meta.env.BASE_URL}exercise-guides/${guide}/${frame}.jpg`,
+  }));
+  const missing = (await Promise.all(candidates.map(async (photo) => {
+    if (await getEntry(photo.id)) return null;
+    const response = await fetch(photo.url);
+    if (!response.ok) throw Error("โหลดรูปประกอบท่าไม่สำเร็จ");
+    return { ...photo, blob: await response.blob() };
+  }))).filter((photo) => photo !== null);
+  const tx = (await db).transaction(["entries", "photos"], "readwrite");
+  const records = tx.objectStore("entries");
+  for (const photo of missing) {
+    if (await records.get(photo.id)) continue;
+    await tx.objectStore("photos").put(photo.blob, photo.id);
+    await records.add({
+      id: photo.id, kind: "photo", dirty: true, version: 0, updatedAt: new Date().toISOString(),
+      data: { machineId, label: name, mime: "image/jpeg" },
+    });
+  }
+  await tx.done;
+}
 export async function addMissingMachines(machines: Array<{ id: string; data: import("./types").Machine }>) {
   const tx = (await db).transaction("entries", "readwrite");
   const existing = new Set(await tx.store.getAllKeys());

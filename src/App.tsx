@@ -63,6 +63,7 @@ import {
   moveReviewedSession,
   moveMachinePhoto,
   addMissingMachines,
+  addBundledMachinePhotos,
 } from "./db";
 import {
   today,
@@ -93,7 +94,6 @@ import ExerciseChart from "./ExerciseChart";
 import { gymCatalogId, gymName, gymsFor, type Gym } from "./gyms";
 import { planSessionMove, type MachineMove } from "./migration";
 import { recoverFormDraft } from "./formDraft";
-import { ExerciseIllustration } from "./HomeRoutine";
 import { exerciseGuide, homeGym, homeMoves, retiredHomeRoutineId } from "./homeTraining";
 type Context = {
   entries: Entry[];
@@ -1306,14 +1306,14 @@ function MachineTile({ e, onClick, preferWe = true }: { e: Entry; onClick: () =>
   const preferred = preferWe && machineVariants(entries, m).find((x) => x.data.gym === "WE Fitness" && machinePhotoIds(entries, x.id, x.data).main);
   const cover = preferred || e;
   const coverPhoto = machinePhotoIds(entries, cover.id, cover.data).main;
-  const homeGuide = cover.data.gym === homeGym && !cover.data.hideIllustration ? exerciseGuide(m.name) : undefined;
+  const homeGuide = cover.data.gym === homeGym &&
+    !entries.some((item) => item.id === `guide-photo-${cover.id}-0`) ? exerciseGuide(m.name) : undefined;
   return (
     <button className="machine-tile" onClick={onClick}>
       <div className="machine-photo">
         {homeGuide && !coverPhoto ? (
           <>
             <img loading="lazy" src={`${import.meta.env.BASE_URL}exercise-guides/${homeGuide}/0.jpg`} alt={`ภาพประกอบ ${m.name}`} />
-            <span className="reference-label">ภาพสาธิต</span>
           </>
         ) : <Photo id={coverPhoto} alt={m.name} />}
         <span className="gym-label">{gymName(entries, cover.data.gym)}</span>
@@ -1450,6 +1450,14 @@ function MachineDetail({ id, close, selectMachine }: {
     [showAll, setShowAll] = useState(false),
     [session, setSession] = useState<string | null>(null);
   const touchStart = useRef<number | null>(null);
+  const guide = e ? exerciseGuide(e.data.name) : undefined;
+  const hasBundledPhotos = [0, 1].every((frame) =>
+    entries.some((item) => item.id === `guide-photo-${id}-${frame}`),
+  );
+  useEffect(() => {
+    if (e && guide && !hasBundledPhotos)
+      void run(() => addBundledMachinePhotos(id, e.data.name, guide));
+  }, [id, guide, hasBundledPhotos]);
   if (!e) return null;
   const m = e.data as Machine;
   const history = machineHistory(entries, id),
@@ -1467,7 +1475,6 @@ function MachineDetail({ id, close, selectMachine }: {
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
   const { photos, main: mainPhoto } = machinePhotoIds(entries, id, m);
   const shown = photos.find((p) => p.id === previewId)?.id ?? mainPhoto;
-  const guide = exerciseGuide(m.name);
   const photoIndex = photos.findIndex((p) => p.id === shown);
   const photoTargets = entries.filter((item) => item.kind === "machine" && !item.deleted && !item.data.archived && item.id !== id);
   async function setMainPhoto(photoId: string) {
@@ -1542,11 +1549,8 @@ function MachineDetail({ id, close, selectMachine }: {
           const next = photos[photoIndex + (end < start ? 1 : -1)];
           if (next) setPreviewId(next.id);
         }}>
-        {!shown && guide && !m.hideIllustration ? (
-          <>
-            <img src={`${import.meta.env.BASE_URL}exercise-guides/${guide}/0.jpg`} alt={`ภาพสาธิต ${m.name}`} />
-            <span className="reference-label">ภาพสาธิต</span>
-          </>
+        {!shown && guide && !hasBundledPhotos ? (
+          <img src={`${import.meta.env.BASE_URL}exercise-guides/${guide}/0.jpg`} alt={m.name} />
         ) : <Photo id={shown} alt={m.name} />}
       </div>
       {photos.length > 1 && (
@@ -1608,16 +1612,9 @@ function MachineDetail({ id, close, selectMachine }: {
         <div>
           <h4>วิธีเล่น</h4>
           <p className="preserve">{m.cues || "ยังไม่มีบันทึก"}</p>
-          {!m.hideIllustration && <ExerciseIllustration name={m.name} />}
         </div>
         <div>
           <h4>รูปเครื่อง</h4>
-          {guide && (
-            <button className="text-button" onClick={() => run(
-              () => save("machine", { ...m, hideIllustration: !m.hideIllustration }, id),
-              m.hideIllustration ? "แสดงภาพสาธิตแล้ว" : "ซ่อนภาพสาธิตแล้ว",
-            )}>{m.hideIllustration ? "แสดงภาพสาธิตอีกครั้ง" : "ซ่อนภาพสาธิต"}</button>
-          )}
           <div className="photo-strip">
             {photos.map((p) => (
               <button

@@ -16,7 +16,7 @@ export function machinePhotoIds(entries: Entry[], machineId: string, machine: Ma
   const preferred = [machine.photoId, machine.referencePhotoId].filter(
     (id): id is string => !!id && belongs(id) && !entries.some((e) => e.id === id && e.deleted),
   );
-  return { photos, main: preferred[0] ?? photos[0]?.id };
+  return { photos, main: preferred[0] ?? photos.find((photo) => !photo.id.startsWith("guide-photo-"))?.id ?? photos[0]?.id };
 }
 
 export function exerciseProgress(entries: Entry[], machineIds: string[]) {
