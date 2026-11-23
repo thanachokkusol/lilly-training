@@ -33,6 +33,14 @@ it("shows individual home exercise cards under the home filter", async () => {
   expect(screen.getByRole("heading", { name: "Goblet Squat" })).toBeTruthy();
   expect(screen.getByRole("heading", { name: "Dead Bug" })).toBeTruthy();
   expect(screen.queryByText("โปรแกรมที่บ้าน · เวททั้งตัว")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: /Goblet Squat.*มีเครื่องที่/ }));
+  const dialog = await topDialog();
+  expect(dialog.getByRole("img", { name: "ภาพสาธิต Goblet Squat" })).toBeTruthy();
+  fireEvent.click(dialog.getByRole("button", { name: "ซ่อนภาพสาธิต" }));
+  await dialog.findByRole("button", { name: "แสดงภาพสาธิตอีกครั้ง" });
+  expect(dialog.queryByRole("img", { name: "ภาพสาธิต Goblet Squat" })).toBeNull();
+  fireEvent.click(dialog.getByRole("button", { name: "แสดงภาพสาธิตอีกครั้ง" }));
+  expect(await dialog.findByRole("img", { name: "ภาพสาธิต Goblet Squat" })).toBeTruthy();
 });
 it("keeps both seed and added photos when changing the main photo and recovers a previously hidden seed photo", async () => {
   const id = "we-photo-regression";
