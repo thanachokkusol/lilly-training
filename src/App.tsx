@@ -199,7 +199,7 @@ function Photo({
     </div>
   );
 }
-function Modal({
+export function Modal({
   title,
   children,
   close,

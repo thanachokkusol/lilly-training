@@ -13,6 +13,7 @@ import {
   ReferenceLine,
 } from "recharts";
 import ExerciseChart from "./ExerciseChart";
+import TrainingCalendar from "./TrainingCalendar";
 import {
   today,
   weekOf,
@@ -66,6 +67,7 @@ export default function Progress() {
           บันทึกผลวัด
         </button>
       </Header>
+      <TrainingCalendar entries={entries} />
       {last && (
         <p className="muted measure-date">
           ผลวัดล่าสุดของแต่ละค่า · บันทึกล่าสุด {dateLabel(last.data.date)}

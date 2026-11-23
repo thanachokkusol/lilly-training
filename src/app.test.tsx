@@ -10,8 +10,9 @@ import {
   within,
 } from "@testing-library/react";
 import App from "./App";
+import TrainingCalendar from "./TrainingCalendar";
 import { save, allEntries } from "./db";
-import { today, weekOf } from "./core";
+import { dateLabel, today, weekOf } from "./core";
 vi.stubGlobal("scrollTo", () => {});
 // UI fixtures use their own fake IndexedDB, never this machine's cloud project.
 vi.stubEnv("VITE_SUPABASE_URL", "");
@@ -24,6 +25,38 @@ afterEach(() => {
   cleanup();
   location.hash = "";
   localStorage.clear();
+});
+it("shows both workout types on the actual date and opens the day's details", async () => {
+  const date = today().slice(0, 7) + "-02";
+  const emptyDate = today().slice(0, 7) + "-03";
+  const metadata = { version: 1, updatedAt: date, dirty: false };
+  render(<TrainingCalendar entries={[
+    { ...metadata, id: "calendar-strength", kind: "session", data: {
+      date, title: "Home workout", status: "completed", exercises: [
+        { machineId: "calendar-exercise", originalName: "Hammer Curl", loadMode: "per-side",
+          sets: [{ id: "calendar-set", load: 5, reps: 12, done: true }] },
+      ],
+    } },
+    { ...metadata, id: "calendar-cardio", kind: "cardio", data: {
+      date, week: "2000-01-02", activity: "ต่อยมวย", seconds: 3600, status: "confirmed",
+    } },
+    { ...metadata, id: "calendar-review", kind: "cardio", data: {
+      date: emptyDate, activity: "เดิน", seconds: 400, status: "review",
+    } },
+  ]} />);
+  fireEvent.click(screen.getByRole("button", { name: `${dateLabel(date)} · Strength และ Cardio` }));
+  const dialog = await topDialog();
+  expect(dialog.getByText("Hammer Curl")).toBeTruthy();
+  expect(dialog.getByText(/ข้างละ 5.*12 ครั้ง/)).toBeTruthy();
+  expect(dialog.getByText("ต่อยมวย")).toBeTruthy();
+  fireEvent.click(dialog.getByRole("button", { name: "ปิด" }));
+  fireEvent.click(screen.getByRole("button", { name: `${dateLabel(emptyDate)} · ไม่มีบันทึก` }));
+  expect((await topDialog()).getByText("ไม่มีบันทึกการฝึกวันนี้")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "ปิด" }));
+  fireEvent.click(screen.getByRole("button", { name: "เดือนก่อน" }));
+  expect(screen.queryByRole("button", { name: `${dateLabel(date)} · Strength และ Cardio` })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "เดือนนี้" }));
+  expect(screen.getByRole("button", { name: `${dateLabel(date)} · Strength และ Cardio` })).toBeTruthy();
 });
 it.each([
   ["Goblet Squat", "home-goblet-squat", 2],
