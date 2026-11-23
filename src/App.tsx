@@ -3735,8 +3735,8 @@ function SettingsPage({
           .map((e) => (
             <div className="trash-row" key={e.id}>
               <span>
-                {e.data.name ?? e.data.title ?? e.data.activity ?? e.kind} ·{" "}
-                {e.data.date ?? ""}
+                {e.data.name ?? e.data.title ?? e.data.activity ?? e.data.label ?? (e.kind === "photo" ? "รูปเครื่อง" : e.kind)}
+                {e.data.date ? ` · ${dateLabel(e.data.date)}` : ""}
               </span>
               <button
                 className="text-button"
