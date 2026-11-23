@@ -2972,23 +2972,61 @@ function OCRModal({
   );
 }
 function useFormDraft(kind: "body" | "cardio", entry?: Entry) {
+  const { entries, run } = useData();
+  const recordId = `settings-form-draft-${kind}-${entry?.id ?? "new"}`;
+  const version = entry?.updatedAt ?? "";
+  const cloudEnabled = Boolean(config());
   const owner = config() ? localStorage.getItem("lilly-owner") ?? "owner" : "local";
   const key = `lilly-form:${sandbox ? "sandbox" : config()?.url ?? "local"}:${owner}:${kind}:${entry?.id ?? "new"}`;
   const [initial, setInitial] = useState<Record<string, string>>(() => {
     try {
-      const saved = JSON.parse(localStorage.getItem(key) ?? "null");
-      return saved?.version === (entry?.updatedAt ?? "") ? saved.fields : {};
+      const cached = JSON.parse(localStorage.getItem(key) ?? "null");
+      const remote = cloudEnabled ? entries.find((e) => e.id === recordId && !e.deleted)?.data : null;
+      const saved = [cached, remote].filter((draft) => draft?.version === version)
+        .sort((a, b) => (b.at ?? 0) - (a.at ?? 0))[0];
+      return saved?.fields ?? {};
     } catch {
       return {};
     }
   });
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const pending = useRef<{ version: string; fields: Record<string, string>; at: number } | null>(null);
+  const queue = useRef(Promise.resolve());
+  function flush() {
+    const data = pending.current;
+    if (!cloudEnabled || !data) return;
+    pending.current = null;
+    queue.current = queue.current.then(() => run(() => save("settings", data, recordId)));
+  }
+  useEffect(() => {
+    const hide = () => { if (document.hidden) flush(); };
+    document.addEventListener("visibilitychange", hide);
+    window.addEventListener("pagehide", flush);
+    return () => {
+      clearTimeout(timer.current);
+      flush();
+      document.removeEventListener("visibilitychange", hide);
+      window.removeEventListener("pagehide", flush);
+    };
+  }, [recordId, cloudEnabled]);
   function clear() {
+    clearTimeout(timer.current);
+    pending.current = null;
     try { localStorage.removeItem(key); } catch { /* Storage is optional. */ }
+    if (cloudEnabled) queue.current = queue.current.then(() => run(async () => {
+      if ((await allEntries()).some((e) => e.id === recordId && !e.deleted)) await trash(recordId);
+    }));
   }
   function write(fields: Record<string, string>) {
+    const data = { version, fields, at: Date.now() };
     try {
-      localStorage.setItem(key, JSON.stringify({ version: entry?.updatedAt ?? "", fields }));
+      localStorage.setItem(key, JSON.stringify(data));
     } catch { /* The form remains usable if storage is unavailable. */ }
+    if (cloudEnabled) {
+      pending.current = data;
+      clearTimeout(timer.current);
+      timer.current = setTimeout(flush, 1200);
+    }
   }
   function read(form: HTMLFormElement) {
     return Object.fromEntries(Array.from(new FormData(form), ([name, value]) =>
@@ -4074,7 +4112,7 @@ function SessionEditorForm({
                     >
                       <span className="exercise-thumb">
                         <Photo
-                          id={m?.photoId ?? m?.referencePhotoId}
+                          id={m && machinePhotoIds(entries, x.machineId, m).main}
                           alt={m?.name ?? "เครื่อง"}
                         />
                         <b>{i + 1}</b>
@@ -4280,12 +4318,9 @@ function ExerciseFocus({
       </div>
       <div className="focus-photo">
         <Photo
-          id={m?.photoId ?? m?.referencePhotoId}
+          id={m && machinePhotoIds(entries, x.machineId, m).main}
           alt={m?.name ?? "เครื่อง"}
         />
-        {!m?.photoId && m?.referencePhotoId && (
-          <span className="reference-label">รูปอ้างอิงจาก Jett</span>
-        )}
       </div>
       <div className="focus-title">
         <small>

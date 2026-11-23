@@ -120,7 +120,13 @@ export function validateEntry(e: Pick<Entry, "id" | "kind" | "data">) {
       ids.add(x.machineId);
     }
   }
-  if (e.kind === "settings" && e.id === "settings-gym-catalog") {
+  if (e.kind === "settings" && /^settings-form-draft-(cardio|body)-/.test(e.id)) {
+    if (typeof d.version !== "string" || !Number.isFinite(d.at) ||
+      !d.fields || typeof d.fields !== "object" || Array.isArray(d.fields) ||
+      Object.keys(d.fields).length > 24 ||
+      Object.values(d.fields).some((v) => typeof v !== "string" || v.length > 5000))
+      throw Error("ข้อมูลแบบร่างไม่ถูกต้อง");
+  } else if (e.kind === "settings" && e.id === "settings-gym-catalog") {
     if (!Array.isArray(d.gyms) || d.gyms.some((g: any) =>
       !g || typeof g.id !== "string" || !g.id.trim() || typeof g.name !== "string" ||
       !g.name.trim() || g.name.length > 80 || typeof g.shortCode !== "string" ||
