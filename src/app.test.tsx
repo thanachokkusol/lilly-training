@@ -25,7 +25,13 @@ afterEach(() => {
   location.hash = "";
   localStorage.clear();
 });
-it("shows individual home exercise cards under the home filter", async () => {
+it.each([
+  ["Goblet Squat", "home-goblet-squat", 2],
+  ["Two-Hand Kettlebell Swing", "home-kb-swing", 2],
+  ["Kettlebell Upright Row", "home-kb-upright-row", 1],
+  ["Push-up", "home-push-up", 2],
+  ["Forward Lunge", "home-forward-lunge", 2],
+] as const)("shows %s under the home filter with editable photos", async (name, id, frameCount) => {
   location.hash = "#machines";
   render(<App />);
   fireEvent.change(await screen.findByLabelText("ฟิตเนส"), { target: { value: "ที่บ้าน" } });
@@ -40,15 +46,16 @@ it("shows individual home exercise cards under the home filter", async () => {
   Object.defineProperty(URL, "createObjectURL", { configurable: true, value: () => "blob:test" });
   Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: () => {} });
   try {
-    fireEvent.click(screen.getByRole("button", { name: /Goblet Squat.*มีเครื่องที่/ }));
+    fireEvent.click(screen.getByRole("heading", { name }));
     const dialog = await topDialog();
     expect(await dialog.findByRole("button", { name: "รูปหลัก" })).toBeTruthy();
-    expect(dialog.getByRole("button", { name: "เปิดรูปเครื่อง" })).toBeTruthy();
+    expect(dialog.queryAllByRole("button", { name: "เปิดรูปเครื่อง" })).toHaveLength(frameCount - 1);
+    expect(dialog.getByLabelText("เลือกรูป")).toBeTruthy();
     fireEvent.click(dialog.getByRole("button", { name: "ลบรูปที่เปิด" }));
     fireEvent.click(screen.getByRole("button", { name: "ยืนยันลบรูป" }));
     await waitFor(async () => {
-      const photos = (await allEntries()).filter((entry) => entry.id.startsWith("guide-photo-home-goblet-squat-"));
-      expect(photos).toHaveLength(2);
+      const photos = (await allEntries()).filter((entry) => entry.id.startsWith(`guide-photo-${id}-`));
+      expect(photos).toHaveLength(frameCount);
       expect(photos.filter((entry) => entry.deleted)).toHaveLength(1);
     });
     cleanup();

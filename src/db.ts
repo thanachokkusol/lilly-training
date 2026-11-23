@@ -3,6 +3,7 @@ import type { Entry, Kind, Session } from "./types";
 import { validateEntry } from "./validation";
 import { exerciseKey, today } from "./core";
 import { planSessionMove, type MachineMove } from "./migration";
+import { exerciseGuideFrames } from "./homeTraining";
 const loadZip = () => import("jszip").then((m) => m.default);
 export const sandbox =
   typeof location !== "undefined" &&
@@ -27,7 +28,7 @@ export async function putEntry(e: Entry) {
   await (await db).put("entries", e);
 }
 export async function addBundledMachinePhotos(machineId: string, name: string, guide: string) {
-  const candidates = [0, 1].map((frame) => ({
+  const candidates = exerciseGuideFrames(guide).map((frame) => ({
     id: `guide-photo-${machineId}-${frame}`,
     url: `${import.meta.env.BASE_URL}exercise-guides/${guide}/${frame}.jpg`,
   }));

@@ -94,7 +94,7 @@ import ExerciseChart from "./ExerciseChart";
 import { gymCatalogId, gymName, gymsFor, type Gym } from "./gyms";
 import { planSessionMove, type MachineMove } from "./migration";
 import { recoverFormDraft } from "./formDraft";
-import { exerciseDemoLink, exerciseGuide, homeGym, homeMoves, retiredHomeRoutineId } from "./homeTraining";
+import { exerciseDemoLink, exerciseGuide, exerciseGuideFrames, homeGym, homeMoves, retiredHomeRoutineId } from "./homeTraining";
 type Context = {
   entries: Entry[];
   refresh: () => Promise<void>;
@@ -1448,7 +1448,7 @@ function MachineDetail({ id, close, selectMachine }: {
     [session, setSession] = useState<string | null>(null);
   const touchStart = useRef<number | null>(null);
   const guide = e ? exerciseGuide(e.data.name) : undefined;
-  const hasBundledPhotos = [0, 1].every((frame) =>
+  const hasBundledPhotos = !guide || exerciseGuideFrames(guide).every((frame) =>
     entries.some((item) => item.id === `guide-photo-${id}-${frame}`),
   );
   useEffect(() => {

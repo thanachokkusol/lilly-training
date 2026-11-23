@@ -69,6 +69,9 @@ const guides: Record<string, string> = {
   "dead bug": "Dead_Bug",
   "chair squat": "Chair_Squat",
   "push-up": "Pushups",
+  "two-hand kettlebell swing": "Kettlebell_Swing",
+  "kettlebell upright row": "Kettlebell_Upright_Row",
+  "forward lunge": "Forward_Lunge",
   "dumbbell forward lunge": "Dumbbell_Lunges",
   "dumbbell biceps curl": "Dumbbell_Bicep_Curl",
   "hammer curl": "Hammer_Curls",
@@ -88,6 +91,10 @@ const guides: Record<string, string> = {
 
 export function exerciseGuide(name: string) {
   return guides[name.normalize("NFKC").trim().toLowerCase()];
+}
+
+export function exerciseGuideFrames(guide: string) {
+  return guide === "Kettlebell_Upright_Row" ? [0] : [0, 1];
 }
 
 const demoLinks: Record<string, string> = {

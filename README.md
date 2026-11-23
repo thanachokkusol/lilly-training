@@ -62,3 +62,9 @@ npm audit
 - build มีเฉพาะ Project URL และ Publishable key ซึ่งเปิดเผยได้ สิทธิ์จริงคุมด้วย RLS
 - Content Security Policy อนุญาตเฉพาะ Supabase, Google Fonts และแพ็กเกจ Tesseract ที่ล็อกเวอร์ชันบน jsdelivr
 - โค้ดโหลด Supabase, jszip และกราฟเมื่อใช้งานจริงเท่านั้น
+
+## Exercise image credits
+
+- Kettlebell Swing illustrations by [Marvin Nazari](https://github.com/MarvinNazari/exercise-images), CC0 1.0. Resized and converted to JPEG.
+- Kettlebell Upright Row photo by [Tyler Read / PT Pioneer](https://www.ptpioneer.com/), from [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Upright_row_with_kettle_bell.jpg), [CC BY 2.0](https://creativecommons.org/licenses/by/2.0/). Resized for the app.
+- Forward Lunge illustrations by [RepDB](https://repdb.co), from its free exercise dataset. Converted to JPEG.
