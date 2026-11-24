@@ -14,14 +14,17 @@ const json = (body: unknown, status = 200) =>
 const fail = (message: string, status = 400) => json({ error: message }, status);
 
 const USERNAME = /^[a-z0-9._-]{3,32}$/;
-export const emailFor = (username: string) => `${username}@lilly.local`;
+const emailFor = (username: string) => `${username}@lilly.local`;
 const validPassword = (p: unknown): p is string => typeof p === "string" && p.length >= 8 && p.length <= 72;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return fail("Method not allowed", 405);
   const url = Deno.env.get("SUPABASE_URL")!;
-  const service = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  // Projects on the new key system expose secret keys as JSON; older ones as SERVICE_ROLE_KEY.
+  const service = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ||
+    (Object.values(JSON.parse(Deno.env.get("SUPABASE_SECRET_KEYS") || "{}"))[0] as string | undefined);
+  if (!service) return fail("ฟังก์ชันยังไม่มีคีย์ของระบบ", 500);
   const admin = createClient(url, service, { auth: { persistSession: false, autoRefreshToken: false } });
 
   const token = req.headers.get("Authorization")?.replace(/^Bearer\s+/i, "");
