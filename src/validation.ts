@@ -48,6 +48,7 @@ export function validateEntry(e: Pick<Entry, "id" | "kind" | "data">) {
     "referencePhotoId",
     "label",
     "mime",
+    "assignedBy",
   ])
     if (d[key] != null && typeof d[key] !== "string")
       throw Error("รูปแบบข้อความหรือรหัสอ้างอิงไม่ถูกต้อง");

@@ -90,7 +90,29 @@ import {
   machinePhotoIds,
   totalLoad,
 } from "./core";
-import { cloud, config, configure, sync, resolveConflict } from "./cloud";
+import {
+  cloud,
+  config,
+  configure,
+  sync,
+  resolveConflict,
+  loginEmail,
+  myProfile,
+  myClients,
+  fetchUserRecords,
+  remotePhoto,
+  currentProfile,
+  type Profile,
+  type Client,
+} from "./cloud";
+import { setReadOnly } from "./db";
+import { TrainerAccounts, ChangePassword } from "./Accounts";
+/** Common equipment and programs; everything else belongs to one person. */
+const isSharedEntry = (e: Entry) =>
+  e.kind === "machine" ||
+  e.kind === "routine" ||
+  e.id === "settings-gym-catalog" ||
+  (e.kind === "photo" && !!e.data?.machineId);
 const Progress = lazy(() => import("./Progress"));
 import ExerciseChart from "./ExerciseChart";
 import { gymCatalogId, gymName, gymsFor, type Gym } from "./gyms";
@@ -186,8 +208,10 @@ function Photo({
     let alive = true,
       url = "";
     setSrc("");
+    const path = revision?.data?._photoPath;
     if (id)
-      photoBlob(id).then((b) => {
+      photoBlob(id).then(async (local) => {
+        const b = local ?? (path ? await remotePhoto(path) : undefined);
         if (b && alive) {
           url = URL.createObjectURL(b);
           setSrc(url);
@@ -412,6 +436,10 @@ export default function App() {
     [busy, setBusy] = useState(false),
     [initialSync, setInitialSync] = useState<string | null>(null),
     [login, setLogin] = useState(false),
+    [profile, setProfile] = useState<Profile | null>(null),
+    [clients, setClients] = useState<Client[]>([]),
+    [viewing, setViewing] = useState<Client | null>(null),
+    [clientRecords, setClientRecords] = useState<Entry[]>([]),
     [authUser, setAuthUser] = useState<string | null>(
       config() ? null : "local",
     );
@@ -579,6 +607,37 @@ export default function App() {
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [cloudUrl, pending]);
+  useEffect(() => {
+    if (!authUser || authUser === "local" || !online) {
+      setProfile(null);
+      return;
+    }
+    let live = true;
+    void myProfile().then(async (p) => {
+      if (!live) return;
+      setProfile(p);
+      setClients(p?.role === "trainer" ? await myClients() : []);
+    });
+    return () => {
+      live = false;
+    };
+  }, [authUser, online]);
+  const viewJournal = async (client: Client | null) => {
+    if (!client) {
+      setReadOnly("");
+      setViewing(null);
+      setClientRecords([]);
+      return;
+    }
+    try {
+      const records = await fetchUserRecords(client.id);
+      setReadOnly(`กำลังดูข้อมูลของ ${client.name} · ดูอย่างเดียว กลับไปที่ "ของฉัน" เพื่อบันทึก`);
+      setClientRecords(records);
+      setViewing(client);
+    } catch (e) {
+      notify(e instanceof Error ? e.message : String(e));
+    }
+  };
   const tabs = [
     ["today", "Today", LayoutDashboard],
     ["machines", "Strength", Dumbbell],
@@ -588,7 +647,16 @@ export default function App() {
     ["settings", "Settings", Settings],
   ] as const;
   return (
-    <Data.Provider value={{ entries, refresh, run, notify }}>
+    <Data.Provider
+      value={{
+        entries: viewing
+          ? [...entries.filter(isSharedEntry), ...clientRecords]
+          : entries,
+        refresh,
+        run,
+        notify,
+      }}
+    >
       <div className="app">
         <aside className="sidebar">
           <a className="brand" href="#today">
@@ -628,6 +696,23 @@ export default function App() {
               Lilly <small>TRAINING</small>
             </span>
             <span className="top-date">{dateLabel(today())}</span>
+            {clients.length > 0 && (
+              <select
+                className="view-switch"
+                aria-label="กำลังดูข้อมูลของ"
+                value={viewing?.id ?? ""}
+                onChange={(e) =>
+                  void viewJournal(clients.find((c) => c.id === e.target.value) ?? null)
+                }
+              >
+                <option value="">กำลังดู: ของฉัน</option>
+                {clients.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    กำลังดู: {c.name} (ลูกเทรน)
+                  </option>
+                ))}
+              </select>
+            )}
             <button
               className="sync-status"
               onClick={() => (config() ? synchronize() : nav("settings"))}
@@ -648,14 +733,22 @@ export default function App() {
             {sandbox && (
               <div className="notice">พื้นที่ทดสอบ · ข้อมูลแยกจากสมุดจริง</div>
             )}
+            {viewing && (
+              <div className="notice view-banner">
+                <strong>กำลังดูข้อมูลของ {viewing.name} · ดูอย่างเดียว</strong>
+                <button className="secondary" onClick={() => void viewJournal(null)}>
+                  กลับไปข้อมูลของฉัน
+                </button>
+              </div>
+            )}
             {locked ? (
               <Empty
                 text={
                   authUser === null
                     ? "กำลังตรวจบัญชี…"
                     : authUser
-                      ? "ข้อมูลในเครื่องนี้ผูกกับบัญชีเจ้าของอีกบัญชี"
-                      : "เข้าสู่ระบบด้วยบัญชีเจ้าของเพื่อเปิดสมุดฝึกส่วนตัว"
+                      ? "ข้อมูลในเครื่องนี้ผูกกับบัญชีอื่น ใช้เบราว์เซอร์แยกสำหรับแต่ละบัญชี"
+                      : "เข้าสู่ระบบเพื่อเปิดสมุดฝึก"
                 }
                 action={
                   <div
@@ -688,6 +781,7 @@ export default function App() {
                 synchronize={() => synchronize()}
                 busy={busy}
                 openLogin={() => setLogin(true)}
+                profile={profile}
               />
             )}
           </div>
@@ -854,7 +948,10 @@ function Today({ nav }: { nav: (p: string) => void }) {
                   >
                     <span>
                       <strong>{r.data.title}</strong>
-                      <small>{r.data.machineIds.length} ท่า</small>
+                      <small>
+                        {r.data.machineIds.length} ท่า
+                        {r.data.assignedBy ? ` · จากเทรนเนอร์ ${r.data.assignedBy}` : ""}
+                      </small>
                     </span>
                     <ChevronRight size={17} />
                   </button>
@@ -1262,6 +1359,11 @@ function RoutineSettings() {
                     machineIds: selected,
                     days: f.getAll("days"),
                     note: String(f.get("note")),
+                    ...(currentProfile()?.role === "trainer"
+                      ? { assignedBy: currentProfile()!.displayName }
+                      : edit?.data.assignedBy
+                        ? { assignedBy: edit.data.assignedBy }
+                        : {}),
                   },
                   edit?.id,
                 );
@@ -3369,10 +3471,15 @@ function Login({ close, done }: { close: () => void; done: () => void }) {
               const c = await cloud();
               if (!c) throw Error("ตั้งค่า Supabase ก่อน");
               const { error } = await c.auth.signInWithPassword({
-                email: String(f.get("email")),
+                email: loginEmail(String(f.get("email"))),
                 password: String(f.get("password")),
               });
-              if (error) throw error;
+              if (error)
+                throw Error(
+                  /invalid/i.test(error.message)
+                    ? "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง"
+                    : error.message,
+                );
               done();
             } finally {
               setBusy(false);
@@ -3380,8 +3487,14 @@ function Login({ close, done }: { close: () => void; done: () => void }) {
           });
         }}
       >
-        <Field label="อีเมลบัญชีเจ้าของ">
-          <input name="email" autoComplete="username" type="email" required />
+        <Field label="ชื่อผู้ใช้หรืออีเมล">
+          <input
+            name="email"
+            autoComplete="username"
+            autoCapitalize="none"
+            spellCheck={false}
+            required
+          />
         </Field>
         <Field label="รหัสผ่าน">
           <input
@@ -3394,9 +3507,11 @@ function Login({ close, done }: { close: () => void; done: () => void }) {
         <button className="primary" disabled={busy}>
           {busy ? "กำลังเข้าสู่ระบบ…" : "เข้าสู่ระบบ"}
         </button>
-        <p className="muted">
-          ไม่มีการเปิดสมัครบัญชีสาธารณะ ใช้บัญชีเจ้าของที่ตั้งค่าใน Supabase
-        </p>
+        <details className="muted">
+          <summary>ลืมรหัสผ่าน?</summary>
+          ติดต่อเจ้าของสมุดเพื่อตั้งรหัสใหม่
+        </details>
+        <p className="muted">ไม่มีการสมัครสาธารณะ บัญชีสร้างโดยเจ้าของ</p>
       </form>
     </Modal>
   );
@@ -3542,10 +3657,12 @@ function SettingsPage({
   synchronize,
   busy,
   openLogin,
+  profile,
 }: {
   synchronize: () => void;
   busy: boolean;
   openLogin: () => void;
+  profile: Profile | null;
 }) {
   const { entries, run, notify } = useData(),
     [cfg, setCfg] = useState(config()),
@@ -3639,6 +3756,21 @@ function SettingsPage({
       <RoutineSettings />
       <GymSettings />
       <ReviewedSessionMigration />
+      {profile && (
+        <section className="panel">
+          <div className="section-title">
+            <div>
+              <h2>บัญชีของฉัน</h2>
+              <p>
+                {profile.displayName} ·{" "}
+                {profile.role === "owner" ? "เจ้าของสมุด" : "เทรนเนอร์"}
+              </p>
+            </div>
+            <ChangePassword profile={profile} />
+          </div>
+        </section>
+      )}
+      {profile?.role === "owner" && <TrainerAccounts />}
       <RestShortcutSettings />
       <section className="panel">
         <h2>เป้าหมายรายสัปดาห์</h2>

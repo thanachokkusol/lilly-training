@@ -9,6 +9,7 @@ import {
   sandbox,
 } from "./db";
 import { validateEntry } from "./validation";
+import type { Entry } from "./types";
 export interface CloudConfig {
   url: string;
   key: string;
@@ -84,7 +85,7 @@ export async function sync(onRecordsReady?: () => Promise<void>) {
   if (authError || !user) throw Error("เข้าสู่ระบบก่อนซิงก์");
   const { data: allowed, error: ownerError } = await c.rpc("is_training_owner");
   if (ownerError || allowed !== true)
-    throw Error("บัญชีนี้ยังไม่ได้รับสิทธิ์เจ้าของสมุดใน Supabase");
+    throw Error("บัญชีนี้ยังไม่ได้รับสิทธิ์ใช้สมุดฝึก");
   const bound = localStorage.getItem("lilly-owner");
   if (bound && bound !== user.id)
     throw Error("ข้อมูลในเครื่องผูกกับบัญชีอื่น กรุณาส่งออกและใช้เบราว์เซอร์แยกบัญชี");
@@ -166,7 +167,7 @@ export async function sync(onRecordsReady?: () => Promise<void>) {
       const query = c
         .from("training_records")
         .select("id,kind,payload,version,deleted,updated_at")
-        .eq("user_id", user.id)
+        .or(`user_id.eq.${user.id},shared.eq.true`)
         .order("id")
         .limit(500);
       const { data, error } = await (lastId ? query.gt("id", lastId) : query);
@@ -235,4 +236,105 @@ export async function resolveConflict(id: string, choice: "local" | "remote") {
   e.conflict = undefined;
   e.updatedAt = new Date().toISOString();
   await putEntry(e);
+}
+
+/** Trainer accounts sign in with a username; Supabase Auth needs an email, so map it. */
+export const loginEmail = (identifier: string) => {
+  const id = identifier.trim().toLowerCase();
+  return id.includes("@") ? id : `${id}@lilly.local`;
+};
+export type Profile = { id: string; role: "owner" | "trainer"; displayName: string; username: string };
+let signedInProfile: Profile | null = null;
+/** Profile loaded at sign-in; used to label programs a trainer assigns. */
+export const currentProfile = () => signedInProfile;
+export async function myProfile(): Promise<Profile | null> {
+  signedInProfile = null;
+  const c = await cloud();
+  if (!c) return null;
+  const { data: auth } = await c.auth.getUser();
+  if (!auth.user) return null;
+  const { data: role } = await c.rpc("journal_role");
+  if (role !== "owner" && role !== "trainer") return null;
+  const { data } = await c.from("profiles").select("display_name,username").eq("id", auth.user.id).maybeSingle();
+  return (signedInProfile = {
+    id: auth.user.id,
+    role,
+    displayName: data?.display_name || data?.username || (auth.user.email ?? ""),
+    username: data?.username ?? "",
+  });
+}
+export type Client = { id: string; name: string };
+/** People whose journal the signed-in trainer may view. */
+export async function myClients(): Promise<Client[]> {
+  const c = await cloud();
+  if (!c) return [];
+  const { data: auth } = await c.auth.getUser();
+  if (!auth.user) return [];
+  const { data: links } = await c.from("coach_links").select("client_id").eq("trainer_id", auth.user.id).eq("status", "active");
+  const ids = (links ?? []).map((l) => l.client_id as string);
+  if (!ids.length) return [];
+  const { data: profiles } = await c.from("profiles").select("id,display_name,username").in("id", ids);
+  return ids.map((id) => {
+    const p = profiles?.find((x) => x.id === id);
+    return { id, name: p?.display_name || p?.username || "ลูกเทรน" };
+  });
+}
+/** Read-only copy of another member's private records (RLS decides what is visible). */
+export async function fetchUserRecords(userId: string): Promise<Entry[]> {
+  const c = await cloud();
+  if (!c) throw Error("ยังไม่ได้เชื่อม Supabase");
+  const out: Entry[] = [];
+  let lastId: string | undefined;
+  for (;;) {
+    const q = c.from("training_records").select("id,kind,payload,version,deleted,updated_at")
+      .eq("user_id", userId).eq("shared", false).order("id").limit(500);
+    const { data, error } = await (lastId ? q.gt("id", lastId) : q);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      validateEntry({ id: row.id, kind: row.kind, data: row.payload });
+      out.push({ id: row.id, kind: row.kind, data: row.payload, version: row.version,
+        updatedAt: row.updated_at, dirty: false, deleted: row.deleted });
+    }
+    if ((data?.length ?? 0) < 500) break;
+    lastId = data![data!.length - 1].id;
+  }
+  return out;
+}
+/** Photo of a record not stored on this device (e.g. a client's evidence). */
+const remotePhotos = new Map<string, Promise<Blob | undefined>>();
+export function remotePhoto(path: string) {
+  if (!remotePhotos.has(path))
+    remotePhotos.set(path, cloud().then(async (c) => {
+      if (!c) return undefined;
+      const { data } = await c.storage.from("training-photos").download(path);
+      return data ?? undefined;
+    }).catch(() => undefined));
+  return remotePhotos.get(path)!;
+}
+export async function trainerAdmin(body: Record<string, unknown>) {
+  const c = await cloud();
+  if (!c) throw Error("ยังไม่ได้เชื่อม Supabase");
+  const { data, error } = await c.functions.invoke("trainer-admin", { body });
+  if (error) {
+    let message = error.message;
+    try {
+      const detail = await (error as any).context?.json?.();
+      if (detail?.error) message = detail.error;
+    } catch { /* keep the generic message */ }
+    throw Error(message);
+  }
+  if (data?.error) throw Error(data.error);
+  return data;
+}
+export async function changeOwnPassword(current: string, next: string) {
+  const c = await cloud();
+  if (!c) throw Error("ยังไม่ได้เชื่อม Supabase");
+  if (next.length < 8) throw Error("รหัสผ่านใหม่ต้องยาวอย่างน้อย 8 ตัวอักษร");
+  const { data: auth } = await c.auth.getUser();
+  const email = auth.user?.email;
+  if (!email) throw Error("เข้าสู่ระบบก่อน");
+  const check = await c.auth.signInWithPassword({ email, password: current });
+  if (check.error) throw Error("รหัสผ่านเดิมไม่ถูกต้อง");
+  const { error } = await c.auth.updateUser({ password: next });
+  if (error) throw error;
 }

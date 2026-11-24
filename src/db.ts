@@ -19,6 +19,15 @@ const db = openDB(
     },
   },
 );
+let readOnlyReason = "";
+/** While a trainer views a client's journal nothing may be written locally. */
+export function setReadOnly(reason: string) {
+  readOnlyReason = reason;
+}
+export const isReadOnly = () => !!readOnlyReason;
+function assertWritable() {
+  if (readOnlyReason) throw Error(readOnlyReason);
+}
 export async function allEntries(): Promise<Entry[]> {
   return (await db).getAll("entries");
 }
@@ -29,6 +38,7 @@ export async function putEntry(e: Entry) {
   await (await db).put("entries", e);
 }
 export async function alignOctoberWalkWeeks(ids: string[]) {
+  assertWritable();
   const tx = (await db).transaction("entries", "readwrite");
   for (const id of ids) {
     const entry = await tx.store.get(id) as Entry | undefined;
@@ -40,6 +50,7 @@ export async function alignOctoberWalkWeeks(ids: string[]) {
   await tx.done;
 }
 export async function addBundledMachinePhotos(machineId: string, name: string, guide: string) {
+  assertWritable();
   const candidates = exerciseGuideFrames(guide).map((frame) => ({
     id: `guide-photo-${machineId}-${frame}`,
     url: `${import.meta.env.BASE_URL}exercise-guides/${guide}/${frame}.jpg`,
@@ -63,6 +74,7 @@ export async function addBundledMachinePhotos(machineId: string, name: string, g
   await tx.done;
 }
 export async function addMissingHomeTraining(obsoleteId?: string) {
+  assertWritable();
   const tx = (await db).transaction("entries", "readwrite");
   const existing = new Set(await tx.store.getAllKeys());
   const defaults = [
@@ -82,6 +94,7 @@ export async function addMissingHomeTraining(obsoleteId?: string) {
   await Promise.all([...changes, tx.done]);
 }
 export async function moveMachinePhoto(photoId: string, from: string, to: string) {
+  assertWritable();
   if (from === to) return;
   const tx = (await db).transaction("entries", "readwrite");
   const [photo, source, target] = await Promise.all([photoId, from, to].map((id) => tx.store.get(id) as Promise<Entry | undefined>));
@@ -102,6 +115,7 @@ export async function moveMachinePhoto(photoId: string, from: string, to: string
   ]);
 }
 export async function mergeExerciseGroups(sourceKey: string, targetKey: string) {
+  assertWritable();
   if (sourceKey === targetKey) throw Error("เลือกท่าที่ต่างกัน");
   const tx = (await db).transaction("entries", "readwrite");
   const entries = (await tx.store.getAll()) as Entry[];
@@ -143,6 +157,7 @@ export async function moveReviewedSession(
   gym: string,
   moves: MachineMove[],
 ) {
+  assertWritable();
   const tx = (await db).transaction("entries", "readwrite");
   const entries = await tx.store.getAll() as Entry[];
   const current = entries.find((entry) => entry.id === expected.id);
@@ -163,6 +178,7 @@ export async function save(
   data: any,
   id: string = crypto.randomUUID(),
 ) {
+  assertWritable();
   validateEntry({ id, kind, data });
   const old = (await (await db).get("entries", id)) as Entry | undefined;
   const e: Entry = {
@@ -179,6 +195,7 @@ export async function save(
   return e;
 }
 export async function trash(id: string) {
+  assertWritable();
   const e = (await (await db).get("entries", id)) as Entry;
   e.deleted = true;
   e.dirty = true;
@@ -186,6 +203,7 @@ export async function trash(id: string) {
   await putEntry(e);
 }
 export async function restoreEntry(id: string) {
+  assertWritable();
   const e = (await (await db).get("entries", id)) as Entry;
   e.deleted = false;
   e.dirty = true;
@@ -202,6 +220,7 @@ export async function clearPhotoBlob(id: string) {
   await (await db).delete("photos", id);
 }
 export async function addPhoto(file: Blob, label: string) {
+  assertWritable();
   if (file.size > 30 * 1024 * 1024) throw Error("รูปต้องไม่เกิน 30 MB");
   if (!file.type.startsWith("image/")) throw Error("เลือกไฟล์รูปภาพ");
   const bitmap = await createImageBitmap(file);
@@ -313,6 +332,7 @@ export async function inspectBackup(file: Blob) {
   return { zip, entries: data.entries as Entry[], future };
 }
 export async function importBackup(file: Blob, replaceExisting = false) {
+  assertWritable();
   const { zip, entries, future } = await inspectBackup(file);
   const futureIds = new Set(future.map((e) => e.id));
   const existing = new Map((await allEntries()).map((e) => [e.id, e]));
