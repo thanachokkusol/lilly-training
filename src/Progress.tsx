@@ -8,6 +8,7 @@ import {
   CartesianGrid,
   BarChart,
   Bar,
+  Cell,
   ReferenceLine,
 } from "recharts";
 import ExerciseChart from "./ExerciseChart";
@@ -21,6 +22,8 @@ import {
   addDays,
   dateLabel,
   cardioTotals,
+  minuteDuration,
+  latestExercise,
   exerciseKey,
 } from "./core";
 import { useData, Header, BodyForm, useRememberedView } from "./App";
@@ -48,7 +51,9 @@ export default function Progress() {
             Number(a.data.gym === "WE Fitness") ||
           a.data.name.localeCompare(b.data.name),
       ),
-    exercises = Array.from(new Map(machines.map((m) => [exerciseKey(m.data), m])).entries()),
+    exercises = Array.from(new Map(machines
+      .filter((m) => !m.data.name.includes("รอยืนยันชื่อ") || latestExercise(active, m.id, today()))
+      .map((m) => [exerciseKey(m.data), m])).entries()),
     chosen = exercises.some(([key]) => key === machine) ? machine : exercises[0]?.[0];
   const reports = archivedInBody(entries);
   const heightPoints = bodyMetricSeries([], reports, "height", "ส่วนสูง", "cm");
@@ -88,6 +93,12 @@ export default function Progress() {
   const weeks = Array.from({ length: 8 }, (_, i) =>
     addDays(weekOf(today()), (i - 7) * 7),
   );
+  const currentWeek = weekOf(today());
+  const cardioWeeks = weeks.map((week) => {
+    const { seconds } = cardioTotals(active, week);
+    return { week: shortDate(week), minutes: seconds / 60, seconds, current: week === currentWeek };
+  });
+  const cardioMax = Math.ceil(Math.max(goal, ...cardioWeeks.map(({ minutes }) => minutes)) / 50) * 50;
   return (
     <>
       <Header
@@ -123,28 +134,26 @@ export default function Progress() {
       <section className="panel">
         <div className="section-title">
           <h2>คาร์ดิโอ 8 สัปดาห์</h2>
+          <small className="muted">เป้า {goal} นาที · สีอ่อน = สัปดาห์นี้</small>
         </div>
         <div className="chart">
           <ResponsiveContainer>
             <BarChart
-              data={weeks.map((w) => ({
-                week: shortDate(w),
-                minutes: Number(
-                  (cardioTotals(active, w).seconds / 60).toFixed(2),
-                ),
-              }))}
+              data={cardioWeeks}
             >
               <CartesianGrid strokeDasharray="3 3" vertical={false} />
               <XAxis dataKey="week" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} domain={[0, (max: number) => Math.max(goal, max)]} />
-              <ReferenceLine y={goal} stroke="#476c4c" strokeDasharray="5 4" label={`เป้า ${goal}`} />
-              <Tooltip />
+              <YAxis tick={{ fontSize: 11 }} domain={[0, cardioMax]} />
+              <ReferenceLine y={goal} stroke="#476c4c" strokeDasharray="5 4" />
+              <Tooltip formatter={(_, __, item) => [minuteDuration(item.payload.seconds), "เวลารวม"]} />
               <Bar
                 name="นาที"
                 dataKey="minutes"
                 fill="#6b8257"
                 radius={[6, 6, 0, 0]}
-              />
+              >
+                {cardioWeeks.map(({ week, current }) => <Cell key={week} fill={current ? "#afbd8e" : "#6b8257"} />)}
+              </Bar>
             </BarChart>
           </ResponsiveContainer>
         </div>

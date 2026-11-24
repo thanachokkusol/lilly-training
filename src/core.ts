@@ -64,6 +64,21 @@ export function addDays(date: string, n: number) {
 export function weekOf(date: string) {
   return addDays(date, -new Date(date + "T12:00:00Z").getUTCDay());
 }
+const octoberWalks: Record<string, [string, string, number]> = {
+  "EX-20261016-02": ["2026-10-16", "2026-10-12", 3600],
+  "EX-20261018-02": ["2026-10-18", "2026-10-12", 1800],
+  "WALK-20261028-01": ["2026-10-28", "2026-10-26", 1907],
+  "WALK-20261029-01": ["2026-10-29", "2026-10-26", 2070],
+};
+export function octoberWalkWeek(entry: Entry) {
+  const original = octoberWalks[entry.id];
+  if (!original || entry.kind !== "cardio" || entry.deleted || entry.conflict) return undefined;
+  const [date, week, seconds] = original;
+  const data = entry.data;
+  if (data.date !== date || data.week !== week || data.seconds !== seconds || data.status !== "confirmed")
+    return undefined;
+  return weekOf(date);
+}
 export const dateLabel = (d: string) =>
   d
     ? new Intl.DateTimeFormat("th-TH-u-ca-gregory", {

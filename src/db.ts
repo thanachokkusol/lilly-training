@@ -1,7 +1,7 @@
 import { openDB } from "idb";
 import type { Entry, Kind, Session } from "./types";
 import { validateEntry } from "./validation";
-import { exerciseKey, today } from "./core";
+import { exerciseKey, octoberWalkWeek, today } from "./core";
 import { planSessionMove, type MachineMove } from "./migration";
 import { exerciseGuideFrames, homeCoachRoutine, homeGym, homeMoves, isObsoleteHomeRoutine } from "./homeTraining";
 const loadZip = () => import("jszip").then((m) => m.default);
@@ -26,6 +26,17 @@ export async function getEntry(id: string): Promise<Entry | undefined> {
 }
 export async function putEntry(e: Entry) {
   await (await db).put("entries", e);
+}
+export async function alignOctoberWalkWeeks(ids: string[]) {
+  const tx = (await db).transaction("entries", "readwrite");
+  for (const id of ids) {
+    const entry = await tx.store.get(id) as Entry | undefined;
+    const week = entry && octoberWalkWeek(entry);
+    if (entry && week) await tx.store.put({
+      ...entry, data: { ...entry.data, week }, dirty: true, updatedAt: new Date().toISOString(),
+    });
+  }
+  await tx.done;
 }
 export async function addBundledMachinePhotos(machineId: string, name: string, guide: string) {
   const candidates = exerciseGuideFrames(guide).map((frame) => ({

@@ -2918,6 +2918,8 @@ summary {
 .cardio-mix-legend dt { display: flex; align-items: center; gap: 7px; font-size: 13px; }
 .cardio-mix-legend dt span { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
 .cardio-mix-legend dd { margin: 3px 0 0; font-size: 12px; color: #dce7dc; }
+.stretch-phase h3 { font-size: clamp(1.5rem, 7vw, 3rem); margin: 0 0 8px; }
+.stretch-phase.active { background: #e1eba9; }
 .stats-row.four {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }

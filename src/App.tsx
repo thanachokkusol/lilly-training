@@ -63,6 +63,7 @@ import {
   moveReviewedSession,
   moveMachinePhoto,
   addMissingHomeTraining,
+  alignOctoberWalkWeeks,
   addBundledMachinePhotos,
 } from "./db";
 import {
@@ -80,6 +81,7 @@ import {
   coachMessage,
   ocrCandidates,
   minuteDuration,
+  octoberWalkWeek,
   machineHistory,
   bestSet,
   hasLoad,
@@ -97,6 +99,7 @@ import { recoverFormDraft } from "./formDraft";
 import { exerciseDemoLink, exerciseGuide, exerciseGuideFrames, homeCoachRoutine, homeGym, homeMoves, isObsoleteHomeRoutine } from "./homeTraining";
 import { reportUrl } from "./bodyDetails";
 import { cardioMix } from "./cardioMix";
+import Stretch from "./Stretch";
 type Context = {
   entries: Entry[];
   refresh: () => Promise<void>;
@@ -550,10 +553,14 @@ export default function App() {
   const needsHomeTraining = [homeCoachRoutine, ...homeMoves].some(({ id }) =>
     !entries.some((entry) => entry.id === id));
   const obsoleteHomeRoutineId = entries.find(isObsoleteHomeRoutine)?.id;
+  const octoberWalkIds = entries.filter(octoberWalkWeek).map((entry) => entry.id).join(",");
   useEffect(() => {
     if (ready && !locked && (needsHomeTraining || obsoleteHomeRoutineId))
       void run(() => addMissingHomeTraining(obsoleteHomeRoutineId));
   }, [ready, locked, needsHomeTraining, obsoleteHomeRoutineId]);
+  useEffect(() => {
+    if (ready && !locked && octoberWalkIds) void run(() => alignOctoberWalkWeeks(octoberWalkIds.split(",")));
+  }, [ready, locked, octoberWalkIds]);
   const hasPushable = entries.some((e) => e.dirty && !e.conflict);
   useEffect(() => {
     if (!canSync || !online || !hasPushable) return;
@@ -762,11 +769,19 @@ function Today({ nav }: { nav: (p: string) => void }) {
       )
       .sort((a, b) => b.data.date.localeCompare(a.data.date) || b.updatedAt.localeCompare(a.updatedAt))
       .slice(0, 4);
-  const [routine, setRoutine] = useState<Entry | null>(null);
-  const startRoutine = (r: Entry) => {
+  const [routine, setRoutine] = useState<{ data: { title: string; machineIds: string[]; note?: string } } | null>(null);
+  const startRoutine = (r: NonNullable<typeof routine>) => {
     setRoutine(r);
     setStart(true);
   };
+  const lastWorkout = active.filter((e) => e.kind === "session" && e.data.status === "completed")
+    .sort((a, b) => b.data.date.localeCompare(a.data.date) || b.updatedAt.localeCompare(a.updatedAt))[0];
+  const repeatMachines = ((lastWorkout?.data.exercises ?? []) as ExerciseLog[])
+    .map(({ machineId }) => active.find((entry) => entry.id === machineId && entry.kind === "machine" && !entry.data.archived))
+    .filter((entry): entry is Entry => Boolean(entry));
+  const repeatGym = repeatMachines[0]?.data.gym;
+  const repeatable = repeatMachines.length > 0 && repeatMachines.every((entry) => entry.data.gym === repeatGym) &&
+    !gymsFor(entries).some((gym) => gym.id === repeatGym && gym.archived);
   return (
     <>
       <Header title="Today" subtitle={longDate(now)} />
@@ -816,6 +831,16 @@ function Today({ nav }: { nav: (p: string) => void }) {
             <>
               <p className="muted">เลือกโปรแกรมเพื่อเริ่มบันทึก หรือเลือกเครื่องเอง</p>
               <div className="routine-buttons">
+                {lastWorkout && repeatable && (
+                  <button className="routine-button" onClick={() => startRoutine({
+                    data: { title: lastWorkout.data.title, machineIds: repeatMachines.map(({ id }) => id) },
+                  })}>
+                    <span><strong>ทำซ้ำครั้งฝึกล่าสุด</strong>
+                      <small>{dateLabel(lastWorkout.data.date)} · {gymName(entries, repeatGym)} · {repeatMachines.length} ท่า</small>
+                    </span>
+                    <ChevronRight size={17} />
+                  </button>
+                )}
                 {routines.map((r) => (
                   <button
                     key={r.id}
@@ -1296,7 +1321,9 @@ function exerciseCards(entries: Entry[], machines: Entry[]) {
     const current = byExercise.get(key);
     if (!current || date > current.date) byExercise.set(key, { machine, date });
   }
-  return Array.from(byExercise.values(), ({ machine }) => machine);
+  return [...byExercise.values()]
+    .sort((a, b) => b.date.localeCompare(a.date) || a.machine.data.name.localeCompare(b.machine.data.name))
+    .map(({ machine }) => machine);
 }
 
 function machineVariants(entries: Entry[], machine: Machine) {
@@ -1306,15 +1333,17 @@ function machineVariants(entries: Entry[], machine: Machine) {
   );
 }
 
-function MachineTile({ e, onClick, preferWe = true }: { e: Entry; onClick: () => void; preferWe?: boolean }) {
+function MachineTile({ e, onClick }: { e: Entry; onClick: () => void }) {
   const { entries } = useData(),
     m = e.data as Machine,
     last = latestExercise(entries, e.id, today());
-  const preferred = preferWe && machineVariants(entries, m).find((x) => x.data.gym === "WE Fitness" && machinePhotoIds(entries, x.id, x.data).main);
-  const cover = preferred || e;
-  const coverPhoto = machinePhotoIds(entries, cover.id, cover.data).main;
-  const homeGuide = cover.data.gym === homeGym &&
-    !entries.some((item) => item.id === `guide-photo-${cover.id}-0`) ? exerciseGuide(m.name) : undefined;
+  const coverPhoto = machinePhotoIds(entries, e.id, m).main;
+  const homeGuide = m.gym === homeGym &&
+    !entries.some((item) => item.id === `guide-photo-${e.id}-0`) ? exerciseGuide(m.name) : undefined;
+  const thai = m.thai?.trim() || ({
+    "seated cable row": "เคเบิลโรว์นั่ง (ดึงหลัง)",
+    "incline press": "ดันอกแนวเฉียงขึ้น",
+  } as Record<string, string>)[m.name.trim().toLowerCase()];
   return (
     <button className="machine-tile" onClick={onClick}>
       <div className="machine-photo">
@@ -1323,12 +1352,12 @@ function MachineTile({ e, onClick, preferWe = true }: { e: Entry; onClick: () =>
             <img loading="lazy" src={`${import.meta.env.BASE_URL}exercise-guides/${homeGuide}/0.jpg`} alt={`ภาพประกอบ ${m.name}`} />
           </>
         ) : <Photo id={coverPhoto} alt={m.name} />}
-        <span className="gym-label">{gymName(entries, cover.data.gym)}</span>
+        <span className="gym-label">{gymName(entries, m.gym)}</span>
       </div>
       <div className="machine-copy">
         <small>{m.group}</small>
         <h3>{m.name}</h3>
-        <p>{m.thai}</p>
+        {thai && <p>{thai}</p>}
         <p className="muted">
           มีเครื่องที่: {[...new Set(machineVariants(entries, m).map((x) => gymName(entries, x.data.gym)))].join(" · ")}
         </p>
@@ -1356,11 +1385,12 @@ function Machines() {
   const { entries, run } = useData(),
     [query, setQuery] = useState(""),
     [gym, setGym] = useState(""),
-    [group, setGroup] = useState("ทั้งหมด"),
+    [savedGroup, setGroup] = useRememberedView("strength-category", "ทั้งหมด"),
     [selected, setSelected] = useRememberedView("machine-detail"),
     [create, setCreate] = useState(false),
     [merge, setMerge] = useState(false),
     [showArchived, setShowArchived] = useState(false);
+  const group = savedGroup ?? "ทั้งหมด";
   const machines = entries.filter(
     (e) =>
       e.kind === "machine" &&
@@ -1401,7 +1431,7 @@ function Machines() {
         </select>
       </div>
       <div className="chips">
-        {["ทั้งหมด", "อก", "หลัง", "ขา", "แกนกลาง", "ไหล่", "แขน", "อื่น ๆ"].map(
+        {["ทั้งหมด", "อก", "หลัง", "ขา", "แกนกลาง", "ไหล่", "แขน", "อื่น ๆ", "Stretch"].map(
           (g) => (
             <button
               className={group === g ? "selected" : ""}
@@ -1413,6 +1443,7 @@ function Machines() {
           ),
         )}
       </div>
+      {group === "Stretch" ? <Stretch /> : <>
       <label className="check-label archive-toggle">
         <input
           type="checkbox"
@@ -1423,7 +1454,7 @@ function Machines() {
       </label>
       <div className="machine-grid">
         {exerciseCards(entries, machines).map((e) => (
-          <MachineTile key={e.id} e={e} preferWe={!gym} onClick={() => setSelected(e.id)} />
+          <MachineTile key={e.id} e={e} onClick={() => setSelected(e.id)} />
         ))}
       </div>
       {!machines.length && <Empty text="ยังไม่มีเครื่องในหมวดนี้" />}
@@ -1432,6 +1463,7 @@ function Machines() {
       )}{" "}
       {create && <MachineForm close={() => setCreate(false)} />}
       {merge && <MergeExercises close={() => setMerge(false)} />}
+      </>}
     </>
   );
 }

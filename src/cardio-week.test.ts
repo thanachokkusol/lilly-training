@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { cardioTotals, parseTime } from "./core";
+import { cardioTotals, octoberWalkWeek, parseTime } from "./core";
 import type { Entry } from "./types";
 
 it("preserves weekly totals, including compensation, and excludes review and deleted records", () => {
@@ -26,4 +26,15 @@ it("preserves weekly totals, including compensation, and excludes review and del
   for (const [week, , expected] of rounds) {
     expect(cardioTotals(entries, week).seconds).toBe(parseTime(expected));
   }
+});
+
+it("moves the confirmed October walk from a legacy Monday bucket only once", () => {
+  const walk: Entry = {
+    id: "WALK-20261028-01", kind: "cardio", version: 1, updatedAt: "", dirty: false,
+    data: { date: "2026-10-28", week: "2026-10-26", status: "confirmed", seconds: 1907 },
+  };
+  expect(octoberWalkWeek(walk)).toBe("2026-10-25");
+  expect(octoberWalkWeek({ ...walk, data: { ...walk.data, week: "2026-10-25" } })).toBeUndefined();
+  expect(octoberWalkWeek({ ...walk, data: { ...walk.data, seconds: 1908 } })).toBeUndefined();
+  expect(octoberWalkWeek({ ...walk, deleted: true })).toBeUndefined();
 });

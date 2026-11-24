@@ -26,6 +26,17 @@ afterEach(() => {
   location.hash = "";
   localStorage.clear();
 });
+it("starts a single stretch from the Stretch category inside Strength", async () => {
+  location.hash = "#machines";
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Stretch" }));
+  fireEvent.click(screen.getByRole("button", { name: /Wall Chest Stretch \(Elbow\)/ }));
+  fireEvent.click((await topDialog()).getByRole("button", { name: "เริ่มท่านี้" }));
+  const timer = await topDialog();
+  expect(timer.getByText(/ขวา · ครั้ง 1\/3/)).toBeTruthy();
+  fireEvent.click(timer.getByRole("button", { name: "ข้ามช่วง" }));
+  expect(timer.getByRole("heading", { name: /พัก ·/ })).toBeTruthy();
+});
 it("shows both workout types on the actual date and opens the day's details", async () => {
   const date = today().slice(0, 7) + "-02";
   const emptyDate = today().slice(0, 7) + "-03";
