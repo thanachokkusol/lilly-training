@@ -26,11 +26,17 @@ afterEach(() => {
   location.hash = "";
   localStorage.clear();
 });
-it("starts a single stretch from the Stretch category inside Strength", async () => {
+it("starts a stretch from a normal Strength tile under the home location", async () => {
   location.hash = "#machines";
   render(<App />);
-  fireEvent.click(await screen.findByRole("button", { name: "Stretch" }));
-  fireEvent.click(screen.getByRole("button", { name: /Wall Chest Stretch \(Elbow\)/ }));
+  const locationFilter = await screen.findByLabelText("ฟิตเนส");
+  fireEvent.change(locationFilter, { target: { value: "WE Fitness" } });
+  expect(screen.queryByRole("button", { name: /Wall Chest Stretch \(Elbow\)/ })).toBeNull();
+  fireEvent.change(locationFilter, { target: { value: "ที่บ้าน" } });
+  const stretch = await screen.findByRole("button", { name: /Wall Chest Stretch \(Elbow\)/ });
+  expect(stretch.classList.contains("machine-tile")).toBe(true);
+  expect(stretch.textContent).toContain("ที่บ้าน");
+  fireEvent.click(stretch);
   fireEvent.click((await topDialog()).getByRole("button", { name: "เริ่มท่านี้" }));
   const timer = await topDialog();
   expect(timer.getByText(/ขวา · ครั้ง 1\/3/)).toBeTruthy();

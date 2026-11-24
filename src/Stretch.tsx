@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
+import { Activity, ArrowUpRight } from "lucide-react";
 import { Modal, useRememberedView } from "./App";
+import { homeGym } from "./homeTraining";
+import StrengthTile from "./StrengthTile";
 
 const moves = [
   ["ยืดอก ศอกพิงกำแพง", "Wall Chest Stretch (Elbow)", "งอศอกประมาณ 90° วางศอกและแขนท่อนล่างบนกำแพงระดับไหล่ แล้วก้าวไปด้านหน้าจนตึงพอดี"],
@@ -37,7 +40,7 @@ function readTimer(stored: string | null): Timer | null {
   }
 }
 
-export default function Stretch() {
+export default function Stretch({ query, showProgram }: { query: string; showProgram: boolean }) {
   const [selected, setSelected] = useState<number | null>(null);
   const [stored, setStored] = useRememberedView("stretch-timer");
   const [now, setNow] = useState(Date.now);
@@ -90,17 +93,27 @@ export default function Stretch() {
     saveTimer({ ...timer, started: time - seconds * 1000, pausedAt: timer.pausedAt ? time : undefined });
   };
   return (
-    <section className="panel">
-      <div className="section-title"><h2>Stretch</h2><button className="primary" onClick={() => start([0, 1, 2])}>เริ่ม Chest Stretch · 5 นาที</button></div>
-      <div className="metric-card-grid">
-        {moves.map(([thai, english], index) => (
-          <button type="button" className="metric-card" key={english} onClick={() => setSelected(index)}>
-            <strong>{thai}</strong><small>{english}</small>
-          </button>
-        ))}
-      </div>
+    <>
+      {moves.map(([thai, english], index) => {
+        if (!`${thai} ${english}`.toLowerCase().includes(query.trim().toLowerCase())) return null;
+        return (
+          <StrengthTile key={english} name={english} thai={thai} group="Stretch · อก" location={homeGym}
+            photo={<div className="photo-empty"><Activity size={36} aria-hidden="true" /></div>}
+            onClick={() => setSelected(index)}>
+            <div className="last-load">
+              <span>{index === 2 ? "สองข้างพร้อมกัน" : "ขวาและซ้าย"}</span>
+              <strong>3 ครั้ง · ค้าง 10 วิ</strong><ArrowUpRight size={17} />
+            </div>
+          </StrengthTile>
+        );
+      })}
+      {showProgram && !query.trim() && (
+        <button className="secondary" onClick={() => start([0, 1, 2])}>เริ่ม Chest Stretch ทั้งชุด · 5 นาที</button>
+      )}
       {selected !== null && <Modal title={moves[selected][0]} close={() => setSelected(null)}>
-        <div className="form"><p>{moves[selected][2]}</p><p>{caution}</p>
+        <div className="detail-body">
+          <div className="focus-title"><small>{homeGym} · Stretch · อก</small><h3>{moves[selected][1]}</h3></div>
+          <div><h4>วิธีเล่น</h4><p>{moves[selected][2]}</p><p>{caution}</p></div>
           <button className="primary" onClick={() => start([selected])}>เริ่มท่านี้</button>
         </div>
       </Modal>}
@@ -125,6 +138,6 @@ export default function Stretch() {
           </> : <><h3>ถึงท้ายโปรแกรมแล้ว</h3><button className="primary" onClick={() => saveTimer(null)}>ปิดตัวจับเวลา</button></>}
         </div>
       </Modal>}
-    </section>
+    </>
   );
 }

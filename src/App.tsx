@@ -100,6 +100,7 @@ import { exerciseDemoLink, exerciseGuide, exerciseGuideFrames, homeCoachRoutine,
 import { reportUrl } from "./bodyDetails";
 import { cardioMix } from "./cardioMix";
 import Stretch from "./Stretch";
+import StrengthTile from "./StrengthTile";
 type Context = {
   entries: Entry[];
   refresh: () => Promise<void>;
@@ -1345,19 +1346,10 @@ function MachineTile({ e, onClick }: { e: Entry; onClick: () => void }) {
     "incline press": "ดันอกแนวเฉียงขึ้น",
   } as Record<string, string>)[m.name.trim().toLowerCase()];
   return (
-    <button className="machine-tile" onClick={onClick}>
-      <div className="machine-photo">
-        {homeGuide && !coverPhoto ? (
-          <>
-            <img loading="lazy" src={`${import.meta.env.BASE_URL}exercise-guides/${homeGuide}/0.jpg`} alt={`ภาพประกอบ ${m.name}`} />
-          </>
-        ) : <Photo id={coverPhoto} alt={m.name} />}
-        <span className="gym-label">{gymName(entries, m.gym)}</span>
-      </div>
-      <div className="machine-copy">
-        <small>{m.group}</small>
-        <h3>{m.name}</h3>
-        {thai && <p>{thai}</p>}
+    <StrengthTile name={m.name} thai={thai} group={m.group} location={gymName(entries, m.gym)} onClick={onClick}
+      photo={homeGuide && !coverPhoto
+        ? <img loading="lazy" src={`${import.meta.env.BASE_URL}exercise-guides/${homeGuide}/0.jpg`} alt={`ภาพประกอบ ${m.name}`} />
+        : <Photo id={coverPhoto} alt={m.name} />}>
         <p className="muted">
           มีเครื่องที่: {[...new Set(machineVariants(entries, m).map((x) => gymName(entries, x.data.gym)))].join(" · ")}
         </p>
@@ -1377,8 +1369,7 @@ function MachineTile({ e, onClick }: { e: Entry; onClick: () => void }) {
           )}
           <ArrowUpRight size={17} />
         </div>
-      </div>
-    </button>
+    </StrengthTile>
   );
 }
 function Machines() {
@@ -1391,6 +1382,7 @@ function Machines() {
     [merge, setMerge] = useState(false),
     [showArchived, setShowArchived] = useState(false);
   const group = savedGroup ?? "ทั้งหมด";
+  const showStretch = (!gym || gym === homeGym) && (group === "ทั้งหมด" || group === "Stretch");
   const machines = entries.filter(
     (e) =>
       e.kind === "machine" &&
@@ -1443,7 +1435,7 @@ function Machines() {
           ),
         )}
       </div>
-      {group === "Stretch" ? <Stretch /> : <>
+      {group !== "Stretch" && (
       <label className="check-label archive-toggle">
         <input
           type="checkbox"
@@ -1452,18 +1444,19 @@ function Machines() {
         />
         แสดงเครื่องที่เก็บเข้าคลัง
       </label>
+      )}
       <div className="machine-grid">
         {exerciseCards(entries, machines).map((e) => (
           <MachineTile key={e.id} e={e} onClick={() => setSelected(e.id)} />
         ))}
+        {showStretch && <Stretch query={query} showProgram={group === "Stretch"} />}
       </div>
-      {!machines.length && <Empty text="ยังไม่มีเครื่องในหมวดนี้" />}
+      {!machines.length && !showStretch && <Empty text="ยังไม่มีเครื่องหรือท่าในหมวดนี้" />}
       {selected && entries.some((e) => e.id === selected && e.kind === "machine" && !e.deleted) && (
         <MachineDetail key={selected} id={selected} close={() => setSelected(null)} selectMachine={setSelected} />
       )}{" "}
       {create && <MachineForm close={() => setCreate(false)} />}
       {merge && <MergeExercises close={() => setMerge(false)} />}
-      </>}
     </>
   );
 }
