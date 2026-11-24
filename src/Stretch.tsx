@@ -1,14 +1,7 @@
 import { useEffect, useState } from "react";
-import { Activity, ArrowUpRight } from "lucide-react";
-import { Modal, useRememberedView } from "./App";
-import { homeGym } from "./homeTraining";
-import StrengthTile from "./StrengthTile";
-
-const moves = [
-  ["ยืดอก ศอกพิงกำแพง", "Wall Chest Stretch (Elbow)", "งอศอกประมาณ 90° วางศอกและแขนท่อนล่างบนกำแพงระดับไหล่ แล้วก้าวไปด้านหน้าจนตึงพอดี"],
-  ["ยืดอก แขนตรงพิงกำแพง", "Wall Chest Stretch (Straight Arm)", "เหยียดแขนแนบกำแพงระดับไหล่ แล้วค่อย ๆ โน้มตัวไปด้านหน้า"],
-  ["ยืดอก กรอบประตู", "Doorway Chest Stretch", "วางแขนสองข้างบนกรอบประตูที่ระดับไหล่ แล้วก้าวผ่านกรอบประตูจนตึงพอดี"],
-] as const;
+import type { ReactNode } from "react";
+import { useRememberedView } from "./App";
+import { stretchMoves as moves } from "./stretchTraining";
 
 type Phase = { move: number; side: string; rep: number; label: string; seconds: number };
 function phasesFor(indices: number[]) {
@@ -27,12 +20,11 @@ function phasesFor(indices: number[]) {
   }
   return phases;
 }
-type Timer = { indices: number[]; started: number; pausedAt?: number };
-const caution = "ยืดจนตึงพอดี หายใจตามปกติ ไหล่ไม่ยัก หยุดหากชาหรือเจ็บแปลบ";
+type Timer = { indices: number[]; started: number; pausedAt?: number; skipped: number[] };
 function readTimer(stored: string | null): Timer | null {
   try {
     const timer = JSON.parse(stored ?? "null") as Timer | null;
-    return timer && Array.isArray(timer.indices) && timer.indices.length &&
+    return timer && Array.isArray(timer.indices) && timer.indices.length && Array.isArray(timer.skipped) &&
       timer.indices.every((index) => Number.isInteger(index) && index >= 0 && index < moves.length) &&
       Number.isFinite(timer.started) && (timer.pausedAt === undefined || Number.isFinite(timer.pausedAt)) ? timer : null;
   } catch {
@@ -40,9 +32,14 @@ function readTimer(stored: string | null): Timer | null {
   }
 }
 
-export default function Stretch({ query, showProgram }: { query: string; showProgram: boolean }) {
-  const [selected, setSelected] = useState<number | null>(null);
-  const [stored, setStored] = useRememberedView("stretch-timer");
+export default function Stretch({ ids, sessionId, onSave, back, photo }: {
+  ids: string[];
+  sessionId: string;
+  onSave: (results: Map<string, number>) => void;
+  back: () => void;
+  photo: (id: string) => ReactNode;
+}) {
+  const [stored, setStored] = useRememberedView(`stretch-timer:${sessionId}:${ids.join(",")}`);
   const [now, setNow] = useState(Date.now);
   const timer = readTimer(stored);
   const phases = timer ? phasesFor(timer.indices) : [];
@@ -83,61 +80,53 @@ export default function Stretch({ query, showProgram }: { query: string; showPro
     setNow(Date.now());
     setStored(value && JSON.stringify(value));
   };
-  const start = (indices: number[]) => {
-    setSelected(null);
-    saveTimer({ indices, started: Date.now() });
-  };
-  const seek = (seconds: number) => {
+  const seek = (seconds: number, skipped: number[]) => {
     if (!timer) return;
     const time = Date.now();
-    saveTimer({ ...timer, started: time - seconds * 1000, pausedAt: timer.pausedAt ? time : undefined });
+    saveTimer({ ...timer, started: time - seconds * 1000, pausedAt: timer.pausedAt ? time : undefined, skipped });
   };
+  const currentIndex = current ? phases.indexOf(current) : phases.length;
+  const results = new Map(ids.map((id) => [id, 0]));
+  phases.slice(0, currentIndex).forEach((phase, index) => {
+    if (phase.label !== "ยืด" || timer?.skipped.includes(index)) return;
+    const id = moves[phase.move].id;
+    results.set(id, (results.get(id) ?? 0) + 1);
+  });
   return (
     <>
-      {moves.map(([thai, english], index) => {
-        if (!`${thai} ${english}`.toLowerCase().includes(query.trim().toLowerCase())) return null;
-        return (
-          <StrengthTile key={english} name={english} thai={thai} group="Stretch · อก" location={homeGym}
-            photo={<div className="photo-empty"><Activity size={36} aria-hidden="true" /></div>}
-            onClick={() => setSelected(index)}>
-            <div className="last-load">
-              <span>{index === 2 ? "สองข้างพร้อมกัน" : "ขวาและซ้าย"}</span>
-              <strong>3 ครั้ง · ค้าง 10 วิ</strong><ArrowUpRight size={17} />
-            </div>
-          </StrengthTile>
-        );
-      })}
-      {showProgram && !query.trim() && (
-        <button className="secondary" onClick={() => start([0, 1, 2])}>เริ่ม Chest Stretch ทั้งชุด · 5 นาที</button>
-      )}
-      {selected !== null && <Modal title={moves[selected][0]} close={() => setSelected(null)}>
-        <div className="detail-body">
-          <div className="focus-title"><small>{homeGym} · Stretch · อก</small><h3>{moves[selected][1]}</h3></div>
-          <div><h4>วิธีเล่น</h4><p>{moves[selected][2]}</p><p>{caution}</p></div>
-          <button className="primary" onClick={() => start([selected])}>เริ่มท่านี้</button>
-        </div>
-      </Modal>}
-      {timer && <Modal title="Chest Stretch" close={() => saveTimer(null)}>
-        <div className="form">
+      <button className="text-button" onClick={back}>กลับไปที่รายการฝึก</button>
+      {!timer ? <button className="primary" onClick={() => saveTimer({
+        indices: ids.map((id) => moves.findIndex((move) => move.id === id)),
+        started: Date.now(), skipped: [],
+      })}>{ids.length > 1 ? "เริ่มจับเวลาทั้งชุด" : "เริ่มจับเวลาท่านี้"}</button> : (
+        <>
           {current ? <>
+            {ids.length > 1 && photo(moves[current.move].id)}
             <div className={`notice stretch-phase ${current.label === "ยืด" ? "active" : ""}`}>
               <h3>{current.label} · {remaining} วิ</h3>
-              <p>{moves[current.move][0]} {current.side && `· ${current.side}`} · ครั้ง {current.rep}/3</p>
-              <p>{moves[current.move][2]}</p>
+              <p>{moves[current.move].thai} {current.side && `· ${current.side}`}{current.label !== "เปลี่ยนท่า" && ` · ครั้ง ${current.rep}/3`}</p>
+              <p className="preserve">{moves[current.move].cues}</p>
             </div>
             <progress max={total} value={Math.min(elapsed, total)} aria-label="ความคืบหน้าการยืด" />
             <div className="upload-row">
-              <button className="secondary" onClick={() => seek(Math.max(0, offset - (phases[phases.indexOf(current) - 1]?.seconds ?? 0)))}>ย้อนช่วง</button>
+              <button className="secondary" onClick={() => seek(Math.max(0, offset - (phases[currentIndex - 1]?.seconds ?? 0)),
+                timer.skipped.filter((index) => index < currentIndex - 1))}>ย้อนช่วง</button>
               <button className="primary" onClick={() => {
                 const time = Date.now();
                 saveTimer(timer.pausedAt ? { ...timer, started: timer.started + time - timer.pausedAt, pausedAt: undefined } :
                   { ...timer, pausedAt: time });
               }}>{timer.pausedAt ? "ทำต่อ" : "พักตัวจับเวลา"}</button>
-              <button className="secondary" onClick={() => seek(offset + current.seconds)}>ข้ามช่วง</button>
+              <button className="secondary" onClick={() => seek(offset + current.seconds, [...timer.skipped, currentIndex])}>ข้ามช่วง</button>
             </div>
-          </> : <><h3>ถึงท้ายโปรแกรมแล้ว</h3><button className="primary" onClick={() => saveTimer(null)}>ปิดตัวจับเวลา</button></>}
-        </div>
-      </Modal>}
+          </> : <h3>ถึงท้ายโปรแกรมแล้ว</h3>}
+          <ul>{ids.map((id) => <li key={id}>{moves.find((move) => move.id === id)?.thai} · ทำแล้ว {results.get(id)} ครั้ง</li>)}</ul>
+          <button className="primary" disabled={![...results.values()].some(Boolean)} onClick={() => {
+            onSave(results);
+            saveTimer(null);
+          }}>บันทึกผลที่ทำแล้ว</button>
+          <button className="text-button" onClick={() => saveTimer(null)}>ล้างตัวจับเวลา</button>
+        </>
+      )}
     </>
   );
 }

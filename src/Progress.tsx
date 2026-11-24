@@ -14,6 +14,7 @@ import {
 import ExerciseChart from "./ExerciseChart";
 import TrainingCalendar from "./TrainingCalendar";
 import BodyProfile from "./BodyProfile";
+import { isStretch } from "./stretchTraining";
 import { BodyMetricChart, BodyMetricDialog, type BodyMetricDetail } from "./BodyMetricChart";
 import { archivedInBody, assessBmi, assessWaist, bmiReference, bodyMetrics, bodyMetricSeries, sizingId, waistReference } from "./bodyDetails";
 import {
@@ -44,7 +45,7 @@ export default function Progress() {
       .filter((e) => e.kind === "body")
       .sort((a, b) => a.data.date.localeCompare(b.data.date)),
     machines = active
-      .filter((e) => e.kind === "machine")
+      .filter((e) => e.kind === "machine" && !isStretch(e.id))
       .sort(
         (a, b) =>
           Number(b.data.gym === "WE Fitness") -

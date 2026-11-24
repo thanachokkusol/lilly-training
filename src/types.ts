@@ -34,6 +34,7 @@ export interface Machine {
   archived?: boolean;
 }
 export interface SetLog {
+  holdSeconds?: number;
   /** Present on numeric sets stored in total kilograms. */
   enteredAs?: "total" | "perSide";
   id: string;

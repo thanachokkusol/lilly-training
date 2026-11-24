@@ -65,6 +65,8 @@ npm audit
 
 ## Exercise image credits
 
+- Wall Chest Stretch (Elbow) uses the one-arm illustration from [Open Exercise Illustrations](https://github.com/MarvinNazari/exercise-images), CC0 1.0. Resized and converted to JPEG.
+
 - Kettlebell Swing illustrations by [Marvin Nazari](https://github.com/MarvinNazari/exercise-images), CC0 1.0. Resized and converted to JPEG.
 - Kettlebell Upright Row photo by [Tyler Read / PT Pioneer](https://www.ptpioneer.com/), from [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Upright_row_with_kettle_bell.jpg), [CC BY 2.0](https://creativecommons.org/licenses/by/2.0/). Resized for the app.
 - Forward Lunge illustrations by [RepDB](https://repdb.co), from its free exercise dataset. Converted to JPEG.

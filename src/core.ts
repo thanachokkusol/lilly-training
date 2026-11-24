@@ -1,4 +1,5 @@
 import type { Entry, Session, LoadMode, SetLog, ExerciseLog, Machine } from "./types";
+import { isStretch } from "./stretchTraining";
 
 export const exerciseKey = (machine: Machine) =>
   machine.exerciseId ?? machine.name.normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
@@ -132,7 +133,8 @@ export const loadText = (s: SetLog, mode: LoadMode) =>
         : `${totalLoad(s, mode)} กก.${(s.enteredAs === "perSide" || (!s.enteredAs && mode === "per-side")) ? ` (ข้างละ ${totalLoad(s, mode)! / 2})` : ""}`
       : s.loadText?.trim() || "ไม่ทราบน้ำหนัก";
 export const formatSet = (s: SetLog, mode: LoadMode) =>
-  `${loadText(s, mode)} × ${s.reps ?? "ไม่ทราบ"} ครั้ง`;
+  s.holdSeconds != null ? `ค้าง ${s.holdSeconds} วิ × ${s.reps ?? "ไม่ทราบ"} ครั้ง` :
+    `${loadText(s, mode)} × ${s.reps ?? "ไม่ทราบ"} ครั้ง`;
 /** A set has a usable load when it is bodyweight, numeric, or kept as the original text. */
 export const hasLoad = (s: SetLog, mode: LoadMode) =>
   mode === "bodyweight" || s.load !== null || !!s.loadText?.trim();
@@ -247,7 +249,7 @@ const activityEmoji = (a: string) =>
             : "🔥";
 const slashDate = (d: string) => d.split("-").reverse().join("/");
 /** One line per exercise done on `date`: name, load × reps, and optional training notes. */
-export function weightLines(entries: Entry[], date: string) {
+export function weightLines(entries: Entry[], date: string, activity: "all" | "strength" | "stretch" = "all") {
   const sessions = entries.filter(
     (e) =>
       e.kind === "session" &&
@@ -258,13 +260,14 @@ export function weightLines(entries: Entry[], date: string) {
   const lines: string[] = [];
   for (const e of sessions)
     for (const x of (e.data as Session).exercises) {
+      if (activity !== "all" && isStretch(x.machineId) !== (activity === "stretch")) continue;
       const done = x.sets.filter((s) => s.done);
       if (!done.length) continue;
       const m = entries.find((m) => m.id === x.machineId)?.data;
       const sets = done
         .map(
           (s) =>
-            `${loadText(s, x.loadMode)} × ${s.reps ?? "ไม่ทราบ"} ครั้ง${s.warmup ? " (วอร์ม)" : ""}`,
+            `${formatSet(s, x.loadMode)}${s.warmup ? " (วอร์ม)" : ""}`,
         )
         .join(" / ");
       let line = `${lines.length + 1}. ${m?.name ?? "เครื่อง"}: ${sets}`;
@@ -346,9 +349,11 @@ export function coachMessage(
     lines.push(`หมายเหตุ: รายการ${dayWord}นับชดเชยให้รอบสัปดาห์นี้`);
   parts.push(lines.join("\n"));
   if (includeWeights) {
-    const w = weightLines(entries, date);
+    const w = weightLines(entries, date, "strength");
     if (w.length)
       parts.push(`🏋️ เวท${dayWord} (${w.length} ท่า)\n${w.join("\n")}`);
+    const stretches = weightLines(entries, date, "stretch");
+    if (stretches.length) parts.push(`🧘 ยืดเหยียด${dayWord} (${stretches.length} ท่า)\n${stretches.join("\n")}`);
   }
   return parts.join("\n\n");
 }

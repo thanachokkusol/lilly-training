@@ -100,6 +100,7 @@ import { exerciseDemoLink, exerciseGuide, exerciseGuideFrames, homeCoachRoutine,
 import { reportUrl } from "./bodyDetails";
 import { cardioMix } from "./cardioMix";
 import Stretch from "./Stretch";
+import { chestStretchRoutine, isStretch, stretchMoves } from "./stretchTraining";
 import StrengthTile from "./StrengthTile";
 type Context = {
   entries: Entry[];
@@ -128,6 +129,7 @@ const shortDate = (d: string) =>
   }).format(new Date(d + "T12:00:00Z"));
 function exerciseFor(machine: Entry, entries: Entry[] = [], date = today(), sessionId?: string): ExerciseLog {
   const m = machine.data as Machine;
+  if (isStretch(machine.id)) return { machineId: machine.id, setup: m.setup, loadMode: "bodyweight", note: "", sets: [] };
   const last = latestExercise(entries, machine.id, date, sessionId)?.exercise;
   const comparable = last && (last.loadMode === m.loadMode ||
     (["total", "per-side"].includes(last.loadMode) && ["total", "per-side"].includes(m.loadMode)));
@@ -551,7 +553,7 @@ export default function App() {
   const locked = cloudUrl && (!authUser || localStorage.getItem("lilly-locked") === "true" ||
     (cachedOwner && cachedOwner !== authUser));
   const ready = loaded && (!canSync || !online || initialSync === authUser);
-  const needsHomeTraining = [homeCoachRoutine, ...homeMoves].some(({ id }) =>
+  const needsHomeTraining = [homeCoachRoutine, chestStretchRoutine, ...homeMoves, ...stretchMoves].some(({ id }) =>
     !entries.some((entry) => entry.id === id));
   const obsoleteHomeRoutineId = entries.find(isObsoleteHomeRoutine)?.id;
   const octoberWalkIds = entries.filter(octoberWalkWeek).map((entry) => entry.id).join(",");
@@ -757,7 +759,9 @@ function Today({ nav }: { nav: (p: string) => void }) {
         e.kind === "session" &&
         e.data.date >= week &&
         e.data.date <= addDays(week, 6) &&
-        e.data.status === "completed",
+        e.data.status === "completed" &&
+        ((e.data.exercises as ExerciseLog[]).length === 0 ||
+          (e.data.exercises as ExerciseLog[]).some((exercise) => !isStretch(exercise.machineId))),
     ),
     draft = active
       .filter((e) => e.kind === "session" && e.data.status === "draft")
@@ -1334,22 +1338,27 @@ function machineVariants(entries: Entry[], machine: Machine) {
   );
 }
 
+function MachineCover({ entry, entries }: { entry: Entry; entries: Entry[] }) {
+  const m = entry.data as Machine;
+  const coverPhoto = machinePhotoIds(entries, entry.id, m).main;
+  const guide = m.gym === homeGym &&
+    !entries.some((item) => item.id === `guide-photo-${entry.id}-0`) ? exerciseGuide(m.name) : undefined;
+  return guide && !coverPhoto
+    ? <img loading="lazy" src={`${import.meta.env.BASE_URL}exercise-guides/${guide}/0.jpg`} alt={`ภาพประกอบ ${m.name}`} />
+    : <Photo id={coverPhoto} alt={m.name} />;
+}
+
 function MachineTile({ e, onClick }: { e: Entry; onClick: () => void }) {
   const { entries } = useData(),
     m = e.data as Machine,
     last = latestExercise(entries, e.id, today());
-  const coverPhoto = machinePhotoIds(entries, e.id, m).main;
-  const homeGuide = m.gym === homeGym &&
-    !entries.some((item) => item.id === `guide-photo-${e.id}-0`) ? exerciseGuide(m.name) : undefined;
   const thai = m.thai?.trim() || ({
     "seated cable row": "เคเบิลโรว์นั่ง (ดึงหลัง)",
     "incline press": "ดันอกแนวเฉียงขึ้น",
   } as Record<string, string>)[m.name.trim().toLowerCase()];
   return (
     <StrengthTile name={m.name} thai={thai} group={m.group} location={gymName(entries, m.gym)} onClick={onClick}
-      photo={homeGuide && !coverPhoto
-        ? <img loading="lazy" src={`${import.meta.env.BASE_URL}exercise-guides/${homeGuide}/0.jpg`} alt={`ภาพประกอบ ${m.name}`} />
-        : <Photo id={coverPhoto} alt={m.name} />}>
+      photo={<MachineCover entry={e} entries={entries} />}>
         <p className="muted">
           มีเครื่องที่: {[...new Set(machineVariants(entries, m).map((x) => gymName(entries, x.data.gym)))].join(" · ")}
         </p>
@@ -1382,7 +1391,6 @@ function Machines() {
     [merge, setMerge] = useState(false),
     [showArchived, setShowArchived] = useState(false);
   const group = savedGroup ?? "ทั้งหมด";
-  const showStretch = (!gym || gym === homeGym) && (group === "ทั้งหมด" || group === "Stretch");
   const machines = entries.filter(
     (e) =>
       e.kind === "machine" &&
@@ -1449,9 +1457,8 @@ function Machines() {
         {exerciseCards(entries, machines).map((e) => (
           <MachineTile key={e.id} e={e} onClick={() => setSelected(e.id)} />
         ))}
-        {showStretch && <Stretch query={query} showProgram={group === "Stretch"} />}
       </div>
-      {!machines.length && !showStretch && <Empty text="ยังไม่มีเครื่องหรือท่าในหมวดนี้" />}
+      {!machines.length && <Empty text="ยังไม่มีเครื่องหรือท่าในหมวดนี้" />}
       {selected && entries.some((e) => e.id === selected && e.kind === "machine" && !e.deleted) && (
         <MachineDetail key={selected} id={selected} close={() => setSelected(null)} selectMachine={setSelected} />
       )}{" "}
@@ -1545,7 +1552,7 @@ function MachineDetail({ id, close, selectMachine }: {
         } else {
           const entry = await save(
             "session",
-            newSession("ฝึกเวท", [id], entries, today(), m.gym),
+            newSession(isStretch(id) ? m.name : "ฝึกเวท", [id], entries, today(), m.gym),
           );
           await refresh();
           setSession(entry.id);
@@ -2055,7 +2062,7 @@ function StartSession({
                   machines
                     .filter(
                       (e) =>
-                        (t === "Full Body" ||
+                        !isStretch(e.id) && (t === "Full Body" ||
                           (t === "Lower Body"
                             ? ["ขา", "แกนกลาง"].includes(e.data.group)
                             : !["ขา"].includes(e.data.group))),
@@ -3943,6 +3950,7 @@ function SessionEditorForm({
   const id = source.id;
   const { entries, run, notify } = useData(),
     [s, setS] = useState<Session>(() => structuredClone(source.data)),
+    [stretchProgram, setStretchProgram] = useRememberedView(`stretch-program:${id}`),
     [saving, setSaving] = useState(false),
     [addMachine, setAddMachine] = useState(false),
     [confirmDelete, setConfirmDelete] = useState(false),
@@ -4075,10 +4083,43 @@ function SessionEditorForm({
   const m = x
     ? (entries.find((e) => e.id === x.machineId)?.data as Machine | undefined)
     : undefined;
+  const stretchIds = s.exercises.filter(({ machineId }) => isStretch(machineId)).map(({ machineId }) => machineId);
+  const stretchPhoto = (machineId: string) => {
+    const machine = entries.find((entry) => entry.id === machineId && entry.kind === "machine");
+    return machine && <MachineCover entry={machine} entries={entries} />;
+  };
+  const timerIds = stretchProgram && stretchIds.length ? stretchIds : x && isStretch(x.machineId) ? [x.machineId] : [];
+  const leaveStretch = () => {
+    setStretchProgram(null);
+    setFocus(null);
+  };
+  const saveStretch = (results: Map<string, number>) => {
+    setS((previous) => ({
+      ...previous,
+      exercises: previous.exercises.map((exercise) => {
+        const reps = results.get(exercise.machineId);
+        if (!reps) return exercise;
+        const set: SetLog = { id: uid(), reps, holdSeconds: 10, load: null, warmup: false, done: true };
+        return { ...exercise, sets: [...exercise.sets, set] };
+      }),
+    }));
+    leaveStretch();
+  };
   return (
     <Modal title={x ? (m?.name ?? "เครื่อง") : s.title || "การฝึก"} close={keep}>
       <div className="form" ref={scroller}>
-        {x && focus !== null ? (
+        {timerIds.length ? (
+          <>
+            {x && <div className="detail-photo">{stretchPhoto(x.machineId)}</div>}
+            {x?.sets.some((set) => set.done) && (
+              <p className="ok">{x.sets.filter((set) => set.done).map((set) => formatSet(set, x.loadMode)).join(" / ")}</p>
+            )}
+            {s.status === "draft"
+              ? <Stretch key={timerIds.join(",")} ids={timerIds} sessionId={id} onSave={saveStretch} back={leaveStretch}
+                  photo={(machineId) => <div className="detail-photo">{stretchPhoto(machineId)}</div>} />
+              : <button className="secondary" onClick={leaveStretch}>กลับไปที่รายการฝึก</button>}
+          </>
+        ) : x && focus !== null ? (
           <ExerciseFocus
             key={x.machineId}
             x={x}
@@ -4125,6 +4166,9 @@ function SessionEditorForm({
               </div>
             )}
             {s.summary && <div className="notice preserve">{s.summary}</div>}
+            {s.status === "draft" && stretchIds.length > 1 && (
+              <button className="primary" onClick={() => setStretchProgram("open")}>เปิดตัวจับเวลา Stretch · {stretchIds.length} ท่า</button>
+            )}
             {s.source && <p className="muted">{s.source}</p>}
             <div className="exercise-list">
               {s.exercises.map((x, i) => {

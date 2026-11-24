@@ -37,11 +37,40 @@ it("starts a stretch from a normal Strength tile under the home location", async
   expect(stretch.classList.contains("machine-tile")).toBe(true);
   expect(stretch.textContent).toContain("ที่บ้าน");
   fireEvent.click(stretch);
-  fireEvent.click((await topDialog()).getByRole("button", { name: "เริ่มท่านี้" }));
+  const details = await topDialog();
+  expect(details.getByLabelText("เลือกรูป")).toBeTruthy();
+  fireEvent.click(details.getByRole("button", { name: /เริ่มฝึกท่านี้|เพิ่มเข้าการฝึกวันนี้/ }));
+  const start = await screen.findByRole("button", { name: "เริ่มจับเวลาท่านี้" });
+  fireEvent.click(start);
   const timer = await topDialog();
   expect(timer.getByText(/ขวา · ครั้ง 1\/3/)).toBeTruthy();
   fireEvent.click(timer.getByRole("button", { name: "ข้ามช่วง" }));
   expect(timer.getByRole("heading", { name: /พัก ·/ })).toBeTruthy();
+  expect(timer.getByRole("button", { name: "บันทึกผลที่ทำแล้ว" }).hasAttribute("disabled")).toBe(true);
+  fireEvent.click(timer.getByRole("button", { name: "ข้ามช่วง" }));
+  const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 10_100);
+  try {
+    await timer.findByText(/ทำแล้ว 1 ครั้ง/);
+    fireEvent.click(timer.getByRole("button", { name: "บันทึกผลที่ทำแล้ว" }));
+    const workout = await topDialog();
+    expect(workout.getByText("ค้าง 10 วิ × 1 ครั้ง")).toBeTruthy();
+    fireEvent.click(workout.getByRole("button", { name: "จบการฝึก" }));
+    await waitFor(async () => {
+      const session = (await allEntries()).find((entry) => entry.kind === "session" && entry.data.title === "Wall Chest Stretch (Elbow)");
+      expect(session?.data.status).toBe("completed");
+      expect(session?.data.exercises[0].sets[0]).toMatchObject({ reps: 1, holdSeconds: 10, load: null });
+    });
+  } finally {
+    clock.mockRestore();
+  }
+});
+it("selects all three home stretches from the Chest Stretch program", async () => {
+  location.hash = "#today";
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Chest Stretch ·? ?3 ท่า/ }));
+  const plan = await topDialog();
+  expect((plan.getByLabelText("ยิมที่ฝึก") as HTMLSelectElement).value).toBe("ที่บ้าน");
+  expect(plan.getByRole("button", { name: /เริ่มบันทึก 3 ท่า/ })).toBeTruthy();
 });
 it("shows both workout types on the actual date and opens the day's details", async () => {
   const date = today().slice(0, 7) + "-02";
@@ -239,6 +268,7 @@ it("starts a session, logs two sets in the focused machine view, and reopens the
   fireEvent.change(screen.getByRole("textbox", { name: "ชื่อครั้งฝึก" }), {
     target: { value: "Regression Session" },
   });
+  fireEvent.change(screen.getByLabelText("ยิมที่ฝึก"), { target: { value: "WE Fitness" } });
   fireEvent.click(screen.getByRole("checkbox", { name: /Regression Machine/ }));
   fireEvent.click(screen.getByRole("button", { name: "เริ่มบันทึก 1 ท่า" }));
   await screen.findByText(/เสร็จ 0\/1 ท่า/);

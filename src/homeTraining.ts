@@ -106,6 +106,7 @@ const guides: Record<string, string> = {
   "two-hand kettlebell swing": "Kettlebell_Swing",
   "kettlebell upright row": "Kettlebell_Upright_Row",
   "forward lunge": "Forward_Lunge",
+  "wall chest stretch (elbow)": "Wall_Chest_Stretch_Elbow",
   "dumbbell forward lunge": "Dumbbell_Lunges",
   "dumbbell biceps curl": "Dumbbell_Bicep_Curl",
   "hammer curl": "Hammer_Curls",
@@ -133,7 +134,7 @@ export function exerciseGuide(name: string) {
 }
 
 export function exerciseGuideFrames(guide: string) {
-  return guide === "Kettlebell_Upright_Row" ? [0] : [0, 1];
+  return ["Kettlebell_Upright_Row", "Wall_Chest_Stretch_Elbow"].includes(guide) ? [0] : [0, 1];
 }
 
 const demoLinks: Record<string, string> = {

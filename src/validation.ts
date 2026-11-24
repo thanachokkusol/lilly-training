@@ -112,6 +112,8 @@ export function validateEntry(e: Pick<Entry, "id" | "kind" | "data">) {
             typeof s !== "object" ||
             !num(s.load) ||
             !num(s.reps, 10000) ||
+            (s.holdSeconds != null && (!Number.isInteger(s.holdSeconds) || s.holdSeconds < 1 || s.holdSeconds > 600 ||
+              x.loadMode !== "bodyweight" || s.load !== null)) ||
             (s.reps !== null && !Number.isInteger(s.reps)) ||
             !text(s.loadText, 200) ||
             (s.warmup != null && typeof s.warmup !== "boolean") ||

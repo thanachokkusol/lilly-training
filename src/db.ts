@@ -4,6 +4,7 @@ import { validateEntry } from "./validation";
 import { exerciseKey, octoberWalkWeek, today } from "./core";
 import { planSessionMove, type MachineMove } from "./migration";
 import { exerciseGuideFrames, homeCoachRoutine, homeGym, homeMoves, isObsoleteHomeRoutine } from "./homeTraining";
+import { chestStretchRoutine, stretchMoves } from "./stretchTraining";
 const loadZip = () => import("jszip").then((m) => m.default);
 export const sandbox =
   typeof location !== "undefined" &&
@@ -65,8 +66,9 @@ export async function addMissingHomeTraining(obsoleteId?: string) {
   const tx = (await db).transaction("entries", "readwrite");
   const existing = new Set(await tx.store.getAllKeys());
   const defaults = [
-    ...homeMoves.map(({ id, ...data }) => ({ id, kind: "machine" as const, data: { ...data, gym: homeGym } })),
+    ...[...homeMoves, ...stretchMoves].map(({ id, ...data }) => ({ id, kind: "machine" as const, data: { ...data, gym: homeGym } })),
     { ...homeCoachRoutine, kind: "routine" as const },
+    { ...chestStretchRoutine, kind: "routine" as const },
   ];
   const updatedAt = new Date().toISOString();
   const missing: Entry[] = defaults.filter(({ id }) => !existing.has(id))
