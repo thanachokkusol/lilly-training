@@ -35,6 +35,7 @@ import {
   Footprints,
   Scale,
   RefreshCw,
+  MoreHorizontal,
 } from "lucide-react";
 
 import type {
@@ -139,6 +140,10 @@ import { cardioMix } from "./cardioMix";
 import Stretch from "./Stretch";
 import { chestStretchRoutine, isStretch, stretchMoves, stretchTiming } from "./stretchTraining";
 import StrengthTile from "./StrengthTile";
+import SetTable from "./SetTable";
+import WorkoutSummary, { MachineInsights, WorkoutNumbers } from "./WorkoutSummary";
+import { muscleIds, muscleLabels, musclesFor, muscleText } from "./muscles";
+import { kg, recordLabels, sessionSets, sessionVolume, setRecords, setsBefore, previousExercise, warmupSets } from "./workoutStats";
 type Context = {
   entries: Entry[];
   refresh: () => Promise<void>;
@@ -220,6 +225,7 @@ function newSession(
     title,
     status: "draft",
     note: "",
+    ...(date === today() && { startedAt: new Date().toISOString() }),
     exercises: machineIds.flatMap((id) => {
       const m = entries.find((e) => e.id === id && e.kind === "machine");
       return m ? [exerciseFor(m, entries, date, undefined, targets[id])] : [];
@@ -925,7 +931,8 @@ function Today({ nav }: { nav: (p: string) => void }) {
     draft = active
       .filter((e) => e.kind === "session" && e.data.status === "draft")
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0],
-    routines = active.filter((e) => e.kind === "routine" && !isObsoleteHomeRoutine(e)),
+    routines = active.filter((e) => e.kind === "routine" && !isObsoleteHomeRoutine(e))
+      .sort((a, b) => (a.data.folder ?? "").localeCompare(b.data.folder ?? "", "th")),
     machines = active.filter((e) => e.kind === "machine" && !e.data.archived && e.data.gym !== homeGym),
     last = active
       .filter(
@@ -1016,7 +1023,7 @@ function Today({ nav }: { nav: (p: string) => void }) {
                     <span>
                       <strong>{r.data.title}</strong>
                       <small>
-                        {r.data.machineIds.length} ท่า
+                        {r.data.folder && `${r.data.folder} · `}{r.data.machineIds.length} ท่า
                         {r.data.assignedBy ? ` · จากเทรนเนอร์ ${r.data.assignedBy}` : ""}
                       </small>
                     </span>
@@ -1136,6 +1143,7 @@ function Today({ nav }: { nav: (p: string) => void }) {
                 : [e.data.exercises.length ? `${e.data.exercises.length} ท่า` : "บันทึกจากสมุดเดิม",
                     ...sessionGyms(entries, e.data).map((id) => gymName(entries, id))].join(" · ")}
             </small>
+            {e.kind === "session" && <WorkoutNumbers entry={e} entries={entries} />}
           </div>
           <ChevronRight size={18} />
         </button>
@@ -1359,7 +1367,17 @@ function MachinePicker({
 function RoutineSettings() {
   const { entries, run } = useData(),
     [edit, setEdit] = useState<Entry | null | undefined>(undefined),
-    [selected, setSelected] = useState<string[]>([]);
+    [selected, setSelected] = useState<string[]>([]),
+    [targets, setTargets] = useState<Record<string, ExerciseTarget>>({});
+  const folders = [...new Set(entries.filter((e) => e.kind === "routine" && !e.deleted && e.data.folder).map((e) => e.data.folder as string))];
+  const changeTarget = (id: string, change: Partial<ExerciseTarget>) =>
+    setTargets((all) => ({ ...all, [id]: { ...(all[id] ?? { sets: 3, reps: 10 }), ...change } }));
+  const move = (index: number, by: number) => setSelected((all) => {
+    const next = [...all];
+    const [item] = next.splice(index, 1);
+    next.splice(index + by, 0, item);
+    return next;
+  });
   const routines = entries.filter((e) => e.kind === "routine" && !e.deleted && !isObsoleteHomeRoutine(e)),
     machines = entries.filter(
       (e) => e.kind === "machine" && !e.deleted && !e.data.archived,
@@ -1376,6 +1394,7 @@ function RoutineSettings() {
           onClick={() => {
             setEdit(null);
             setSelected([]);
+            setTargets({});
           }}
         >
           <Plus size={16} />
@@ -1387,7 +1406,7 @@ function RoutineSettings() {
           <div>
             <strong>{r.data.title}</strong>
             <p className="muted">
-              {r.data.machineIds.length} ท่า ·{" "}
+              {r.data.folder && `${r.data.folder} · `}{r.data.machineIds.length} ท่า ·{" "}
               {r.data.days?.join(" / ") || "ไม่กำหนดวัน"}
             </p>
           </div>
@@ -1396,6 +1415,7 @@ function RoutineSettings() {
             onClick={() => {
               setEdit(r);
               setSelected(r.data.machineIds);
+              setTargets(r.data.targets ?? {});
             }}
           >
             แก้ไข
@@ -1430,9 +1450,8 @@ function RoutineSettings() {
                     machineIds: selected,
                     days: f.getAll("days"),
                     note: String(f.get("note")),
-                    ...(edit?.data.targets && {
-                      targets: Object.fromEntries(Object.entries(edit.data.targets).filter(([id]) => selected.includes(id))),
-                    }),
+                    folder: String(f.get("folder")).trim() || undefined,
+                    targets: Object.fromEntries(Object.entries(targets).filter(([id]) => selected.includes(id))),
                     ...(currentProfile()?.role === "trainer"
                       ? { assignedBy: currentProfile()!.displayName }
                       : edit?.data.assignedBy
@@ -1462,9 +1481,43 @@ function RoutineSettings() {
                 </label>
               ))}
             </div>
+            <Field label="โฟลเดอร์ (ถ้ามี)">
+              <input name="folder" list="routine-folders" maxLength={60} defaultValue={edit?.data.folder} placeholder="เช่น ที่บ้าน / WE" />
+            </Field>
+            <datalist id="routine-folders">{folders.map((folder) => <option key={folder} value={folder} />)}</datalist>
             <Field label="โน้ตจากเทรนเนอร์">
               <textarea name="note" defaultValue={edit?.data.note} />
             </Field>
+            {selected.length > 0 && <p>ลำดับและเป้าของแต่ละท่า</p>}
+            {selected.map((id, index) => {
+              const machine = entries.find((e) => e.id === id)?.data as Machine | undefined;
+              const name = machine?.name ?? "ท่าที่เลือก";
+              const target = targets[id];
+              return (
+                <div className="routine-target" key={id}>
+                  <div className="routine-target-head">
+                    <strong>{index + 1}. {name}</strong>
+                    <button type="button" className="icon" aria-label={`เลื่อน ${name} ขึ้น`} disabled={!index} onClick={() => move(index, -1)}><ArrowLeft size={16} className="turn-up" /></button>
+                    <button type="button" className="icon" aria-label={`เลื่อน ${name} ลง`} disabled={index === selected.length - 1} onClick={() => move(index, 1)}><ArrowLeft size={16} className="turn-down" /></button>
+                    <button type="button" className="icon" aria-label={`เอา ${name} ออกจากโปรแกรม`} onClick={() => setSelected((all) => all.filter((item) => item !== id))}><X size={16} /></button>
+                  </div>
+                  {!isStretch(id) && (
+                    <div className="routine-target-fields">
+                      <label>เซต<input type="number" min="1" max="20" aria-label={`${name} จำนวนเซตเป้า`} value={target?.sets ?? ""} placeholder="–"
+                        onChange={(e) => e.target.value === "" ? setTargets(({ [id]: _drop, ...rest }) => rest) :
+                          changeTarget(id, { sets: Math.min(20, Math.max(1, Math.round(Number(e.target.value)))) })} /></label>
+                      <label>ครั้ง<input type="number" min="1" max="1000" aria-label={`${name} จำนวนครั้งเป้า`} value={target?.reps ?? ""} placeholder="–"
+                        onChange={(e) => e.target.value !== "" && changeTarget(id, { reps: Math.min(1000, Math.max(1, Math.round(Number(e.target.value)))) })} /></label>
+                      <label>พัก<select aria-label={`${name} เวลาพัก`} value={target?.rest ?? ""} disabled={!target}
+                        onChange={(e) => changeTarget(id, { rest: e.target.value === "" ? undefined : Number(e.target.value) })}>
+                        <option value="">ค่าเริ่มต้น</option>
+                        {restChoices.map((seconds) => <option key={seconds} value={seconds}>{restText(seconds)}</option>)}
+                      </select></label>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
             <p>เลือกท่าตามลำดับ</p>
             {machines.map((m) => (
               <label key={m.id} className="select-row">
@@ -1836,6 +1889,7 @@ function MachineDetail({ id, close, selectMachine }: {
             <p>{m.historicalResult}</p>
           </div>
         )}
+        <MachineInsights id={id} machine={m} entries={entries} />
         <div>
           <h4>การตั้งเครื่อง</h4>
           <p className="preserve">{m.setup || "ยังไม่มีบันทึก"}</p>
@@ -2049,6 +2103,15 @@ function MachineForm({
   const [name, setName] = useState(m?.name ?? variantOf?.data.name ?? initialName ?? "");
   const [match, setMatch] = useState<Entry | null>(variantOf ?? null);
   const [distinct, setDistinct] = useState(false);
+  const [muscles, setMuscles] = useState<Machine["muscles"]>(m?.muscles ?? variantOf?.data.muscles);
+  const shownMuscles = muscles ?? musclesFor({ name, group: m?.group ?? "" });
+  const cycleMuscle = (muscle: string) => {
+    const primary = shownMuscles.primary.filter((item) => item !== muscle) as string[];
+    const secondary = shownMuscles.secondary.filter((item) => item !== muscle) as string[];
+    if ((shownMuscles.primary as string[]).includes(muscle)) secondary.push(muscle);
+    else if (!(shownMuscles.secondary as string[]).includes(muscle)) primary.push(muscle);
+    setMuscles({ primary, secondary });
+  };
   const suggestions = entry ? [] : exerciseCards(entries, entries.filter((e) =>
     e.kind === "machine" && !e.deleted &&
     [e.data.name, e.data.thai, ...(e.data.aliases ?? [])].some((alias) => alias && similarExerciseName(name, alias)),
@@ -2077,6 +2140,7 @@ function MachineForm({
                 setup: f.get("setup"),
                 cues: f.get("cues"),
                 loadMode: f.get("loadMode"),
+                muscles: muscles?.primary.length || muscles?.secondary.length ? muscles : undefined,
               },
               entry?.id,
             );
@@ -2137,6 +2201,19 @@ function MachineForm({
             <option value="bodyweight">น้ำหนักตัว</option>
           </select>
         </Field>
+        <details>
+          <summary>กล้ามเนื้อที่ได้: {muscleText([...shownMuscles.primary, ...shownMuscles.secondary] as typeof muscleIds) || "ยังไม่ระบุ"}</summary>
+          <p className="muted">แตะเพื่อสลับ ไม่ใช้ → เน้น → ช่วย</p>
+          <div className="chips">
+            {muscleIds.map((muscle) => {
+              const role = (shownMuscles.primary as string[]).includes(muscle) ? "เน้น" :
+                (shownMuscles.secondary as string[]).includes(muscle) ? "ช่วย" : "";
+              return <button type="button" key={muscle} className={role ? "selected" : ""} aria-pressed={!!role}
+                onClick={() => cycleMuscle(muscle)}>{muscleLabels[muscle]}{role && ` · ${role}`}</button>;
+            })}
+          </div>
+          {muscles && <button type="button" className="text-button" onClick={() => setMuscles(undefined)}>กลับไปใช้ค่าอัตโนมัติ</button>}
+        </details>
         <Field label="การตั้งเบาะ / เครื่อง">
           <textarea name="setup" defaultValue={m?.setup} />
         </Field>
@@ -2375,6 +2452,81 @@ function writeRestPreference(name: string, value: string | null) {
   } catch { /* The in-page timer still works. */ }
 }
 
+const defaultRest = () => Number(readRestPreference("rest-default") ?? 90);
+const autoRest = () => readRestPreference("rest-auto") !== "false";
+const showRpe = () => readRestPreference("show-rpe") === "true";
+let restSound: AudioContext | undefined;
+function startRest(sessionId: string, seconds: number) {
+  if (!seconds) return;
+  try {
+    // Sound is only allowed after a tap, so the context is opened while the set is being confirmed.
+    if (readRestPreference("rest-sound") !== "false" && "AudioContext" in window) {
+      restSound ??= new AudioContext();
+      void restSound.resume();
+    }
+  } catch { /* The visible timer still works. */ }
+  window.dispatchEvent(new CustomEvent("lilly-rest", { detail: { sessionId, seconds } }));
+}
+function restBeep() {
+  if (!restSound || document.hidden || readRestPreference("rest-sound") === "false") return;
+  for (const [at, pitch] of [[0, 880], [0.22, 1175]]) {
+    const tone = restSound.createOscillator(), volume = restSound.createGain();
+    tone.frequency.value = pitch;
+    volume.gain.setValueAtTime(0.18, restSound.currentTime + at);
+    volume.gain.exponentialRampToValueAtTime(0.001, restSound.currentTime + at + 0.2);
+    tone.connect(volume).connect(restSound.destination);
+    tone.start(restSound.currentTime + at);
+    tone.stop(restSound.currentTime + at + 0.2);
+  }
+}
+const restChoices = [0, 30, 45, 60, 75, 90, 120, 150, 180, 240, 300];
+const restText = (seconds: number) => !seconds ? "ไม่จับเวลา" :
+  seconds < 60 ? `${seconds} วิ` : `${Math.floor(seconds / 60)}:${(seconds % 60).toString().padStart(2, "0")} นาที`;
+
+/** Choices that follow the device, not the account. */
+function WorkoutPreferences() {
+  const [auto, setAuto] = useState(autoRest);
+  const [rest, setRest] = useState(defaultRest);
+  const [rpe, setRpe] = useState(showRpe);
+  const [sound, setSound] = useState(() => readRestPreference("rest-sound") !== "false");
+  return (
+    <section className="panel">
+      <h2>การบันทึกเวท</h2>
+      <div className="preference-list">
+        <label className="check-label">
+          <input type="checkbox" checked={auto} onChange={(e) => {
+            setAuto(e.target.checked);
+            writeRestPreference("rest-auto", String(e.target.checked));
+          }} />
+          จับเวลาพักเองเมื่อกดเสร็จเซต
+        </label>
+        <Field label="เวลาพักเริ่มต้น">
+          <select value={rest} disabled={!auto} onChange={(e) => {
+            setRest(Number(e.target.value));
+            writeRestPreference("rest-default", e.target.value);
+          }}>
+            {restChoices.map((seconds) => <option key={seconds} value={seconds}>{restText(seconds)}</option>)}
+          </select>
+        </Field>
+        <label className="check-label">
+          <input type="checkbox" checked={sound} onChange={(e) => {
+            setSound(e.target.checked);
+            writeRestPreference("rest-sound", String(e.target.checked));
+          }} />
+          เสียงเตือนเมื่อหมดเวลาพัก (ขณะเปิดแอปอยู่)
+        </label>
+        <label className="check-label">
+          <input type="checkbox" checked={rpe} onChange={(e) => {
+            setRpe(e.target.checked);
+            writeRestPreference("show-rpe", String(e.target.checked));
+          }} />
+          แสดงช่อง RPE (ความหนัก 6–10)
+        </label>
+      </div>
+    </section>
+  );
+}
+
 function RestTimer({ sessionId }: { sessionId: string }) {
   const key = `rest:${sessionId}`;
   const [end, setEnd] = useState(() => Number(readRestPreference(key)) || null);
@@ -2386,6 +2538,18 @@ function RestTimer({ sessionId }: { sessionId: string }) {
     setNow(Date.now());
     setEnd(value);
   }
+  useEffect(() => {
+    const start = (event: Event) => {
+      const { sessionId: target, seconds: rest } = (event as CustomEvent<{ sessionId: string; seconds: number }>).detail;
+      if (target === sessionId) updateEnd(Date.now() + rest * 1000);
+    };
+    window.addEventListener("lilly-rest", start);
+    return () => window.removeEventListener("lilly-rest", start);
+  }, [sessionId]);
+  useEffect(() => {
+    // Only when it runs out on screen, not when an old timer is opened again.
+    if (expired && end && Date.now() - end < 1500) restBeep();
+  }, [expired]);
   useEffect(() => {
     if (!end) return;
     const tick = () => setNow(Date.now());
@@ -2409,7 +2573,7 @@ function RestTimer({ sessionId }: { sessionId: string }) {
           ? `พัก ${Math.floor(seconds / 60)}:${(seconds % 60).toString().padStart(2, "0")}`
           : "จับเวลาพัก"}
       </span>
-      {[60, 90, 120].map((n) => (
+      {!end && [60, 90, 120].map((n) => (
         <button
           key={n}
           onClick={() => {
@@ -2419,6 +2583,11 @@ function RestTimer({ sessionId }: { sessionId: string }) {
           }}
         >
           {n}วิ
+        </button>
+      ))}
+      {end && !expired && ([[-15, "ลด 15 วิ"], [15, "เพิ่ม 15 วิ"]] as const).map(([change, label]) => (
+        <button key={change} aria-label={label} onClick={() => updateEnd(Math.max(Date.now(), end + change * 1000))}>
+          {change > 0 ? "+15" : "−15"}
         </button>
       ))}
       {end && (
@@ -3521,6 +3690,7 @@ function HistoryPage() {
                         .filter(Boolean)
                         .join(" · ")}
               </small>
+              {e.kind === "session" && <WorkoutNumbers entry={e} entries={entries} />}
             </div>
             <ChevronRight size={18} />
           </button>
@@ -3882,6 +4052,7 @@ function SettingsPage({
           {entries.filter((e) => e.dirty).length} รายการ
         </p>
       </section>}
+      <WorkoutPreferences />
       <RoutineSettings />
       {showOwnerSettings && <><GymSettings /><ReviewedSessionMigration /></>}
       {showOwnerSettings && <RestShortcutSettings />}
@@ -4150,6 +4321,12 @@ function SessionView({ source, close }: { source: Entry; close: () => void }) {
   const { entries, run } = useData();
   const session = source.data as Session;
   const venues = sessionGyms(entries, session).map((gym) => gymName(entries, gym));
+  const [summary, setSummary] = useState(false);
+  if (summary) return (
+    <Modal title="สรุปการฝึก" close={() => setSummary(false)}>
+      <div className="form"><WorkoutSummary entry={source} entries={entries} /></div>
+    </Modal>
+  );
   return (
     <Modal title={session.title || "การฝึก"} close={close}>
       <div className="form">
@@ -4185,6 +4362,10 @@ function SessionView({ source, close }: { source: Entry; close: () => void }) {
             );
           })}
         </div>
+        <WorkoutNumbers entry={source} entries={entries} />
+        {session.status !== "draft" && session.exercises.length > 0 && (
+          <button className="secondary" onClick={() => setSummary(true)}>ดูสรุปและกล้ามเนื้อ</button>
+        )}
         {session.note && <p className="preserve">{session.note}</p>}
         <button className="secondary" onClick={() =>
           run(() => navigator.clipboard.writeText(workoutMessage(session, entries)), "คัดลอกสรุปเวทแล้ว")}>
@@ -4250,6 +4431,9 @@ function SessionEditorForm({
     [addMachine, setAddMachine] = useState(false),
     [confirmDelete, setConfirmDelete] = useState(false),
     [removeExercise, setRemoveExercise] = useState<number | null>(null),
+    [menu, setMenu] = useState<string | null>(null),
+    [summary, setSummary] = useState<Entry | null>(null),
+    [clock, setClock] = useState(Date.now),
     [focus, setFocus] = useState<number | null>(() => {
       const machine = focusMachine ?? (source.data.status === "draft" ? readView(`focus:${id}`) : null);
       const i = (source.data as Session).exercises.findIndex(
@@ -4304,8 +4488,8 @@ function SessionEditorForm({
   useEffect(() => {
     const modal = scroller.current?.closest<HTMLElement>(".modal");
     if (modal) modal.scrollTop = 0;
-    if (s.status === "draft") writeView(`focus:${id}`, focus === null ? null : s.exercises[focus]?.machineId ?? null);
-  }, [focus]);
+    if (s.status === "draft" && !summary) writeView(`focus:${id}`, focus === null ? null : s.exercises[focus]?.machineId ?? null);
+  }, [focus, !!summary]);
   const update = (i: number, x: ExerciseLog) =>
     setS((v) => ({
       ...v,
@@ -4362,13 +4546,16 @@ function SessionEditorForm({
     let finished = false;
     await run(
       async () => {
-        await saveDraft({
+        const final: Session = {
           ...s,
           status: s.status === "draft" ? "completed" : s.status,
-        });
+          ...(s.status === "draft" && s.startedAt && { endedAt: new Date().toISOString() }),
+        };
+        await saveDraft(final);
         finished = true;
         writeView(`focus:${id}`, null);
-        close();
+        if (s.status === "draft") setSummary({ ...source, data: final, updatedAt: new Date().toISOString() });
+        else close();
       },
       s.status === "draft" ? "บันทึกการฝึกแล้ว" : "บันทึกการแก้ไขแล้ว",
     );
@@ -4377,7 +4564,63 @@ function SessionEditorForm({
     finishing.current = false;
     setSaving(false);
   }
+  useEffect(() => {
+    if (s.status !== "draft" || !s.startedAt) return;
+    const t = setInterval(() => setClock(Date.now()), 15000);
+    return () => clearInterval(t);
+  }, [s.status, s.startedAt]);
+  const toggleSet = (i: number, j: number) => {
+    const exercise = s.exercises[i], a = exercise.sets[j];
+    if (!a.done && (!a.reps || !hasLoad(a, exercise.loadMode))) {
+      notify("กรอกน้ำหนักและจำนวนครั้งก่อนยืนยัน");
+      return;
+    }
+    patchSet(i, j, { done: !a.done });
+    if (a.done || s.status !== "draft") return;
+    const past = setsBefore(entries, exercise.machineId, { id, date: s.date });
+    const earlier = exercise.sets.filter((set, n) => n !== j && set.done).map((set) => ({ set, mode: exercise.loadMode }));
+    const kinds = past.length ? setRecords([...past, ...earlier], { ...a, done: true }, exercise.loadMode) : [];
+    const name = entries.find((e) => e.id === exercise.machineId)?.data.name ?? "ท่านี้";
+    if (kinds.length) notify(`สถิติใหม่ ${name}: ${kinds.map((kind) => recordLabels[kind]).join(" · ")}`);
+    const partner = exercise.superset === undefined ? undefined :
+      s.exercises.find((other, n) => n > i && other.superset === exercise.superset);
+    if (partner) document.getElementById(`exercise-${partner.machineId}`)?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+    else if (autoRest() && s.date === today()) startRest(id, exercise.restSeconds ?? exercise.target?.rest ?? defaultRest());
+  };
+  const moveExercise = (i: number, by: number) => setS((v) => {
+    const exercises = [...v.exercises];
+    const [item] = exercises.splice(i, 1);
+    exercises.splice(i + by, 0, item);
+    return { ...v, exercises };
+  });
+  const toggleSuperset = (i: number) => setS((v) => {
+    const group = v.exercises[i].superset;
+    if (group !== undefined) {
+      const left = v.exercises.filter((other, n) => n !== i && other.superset === group);
+      return { ...v, exercises: v.exercises.map((other, n) => n === i || (other.superset === group && left.length < 2)
+        ? { ...other, superset: undefined } : other) };
+    }
+    const joined = v.exercises[i + 1].superset ?? Math.max(0, ...v.exercises.map((other) => other.superset ?? 0)) + 1;
+    return { ...v, exercises: v.exercises.map((other, n) => n === i || n === i + 1 ? { ...other, superset: joined } : other) };
+  });
+  const addWarmups = (i: number) => {
+    const exercise = s.exercises[i];
+    const first = exercise.sets.find((set) => !set.warmup && set.load !== null);
+    const load = first && totalLoad(first, exercise.loadMode);
+    const steps = load ? warmupSets(load, exercise.loadMode === "per-side" ? 5 : 2.5) : [];
+    if (!steps.length) return notify("กรอกน้ำหนักเซตจริงก่อน แล้วลิลลี่จะคำนวณเซตวอร์มให้");
+    const mode: SetLog["enteredAs"] = exercise.loadMode === "per-side" ? "perSide" : "total";
+    update(i, { ...exercise, sets: [
+      ...steps.map((step): SetLog => ({ id: uid(), load: step.load, reps: step.reps, enteredAs: mode, warmup: true, done: false })),
+      ...exercise.sets.filter((set) => !set.warmup || set.done),
+    ] });
+  };
+  const supersetLetter = (group: number) => {
+    const groups = [...new Set(s.exercises.flatMap((other) => other.superset ?? []))];
+    return String.fromCharCode(65 + groups.indexOf(group) % 26);
+  };
   const keep = () => {
+    if (summary) return close();
     if (finishing.current) return;
     return run(async () => {
       await saveDraft(latest.current);
@@ -4410,9 +4653,33 @@ function SessionEditorForm({
     }));
     leaveStretch();
   };
+  if (summary) return (
+    <Modal title="สรุปการฝึก" close={() => finishing.current ? close() : setSummary(null)}>
+      <div className="form" ref={scroller}>
+        <WorkoutSummary entry={summary} entries={entries} />
+        <div className="sticky-actions">
+          <button className="secondary" onClick={() => run(() => navigator.clipboard.writeText(workoutMessage(summary.data, entries)), "คัดลอกสรุปเวทแล้ว")}>
+            <Copy size={16} /> คัดลอกสรุปเวท
+          </button>
+          <button className="primary" onClick={() => finishing.current ? close() : setSummary(null)}>เสร็จ</button>
+        </div>
+      </div>
+    </Modal>
+  );
+  const minutes = s.startedAt && s.status === "draft" ? Math.floor((clock - Date.parse(s.startedAt)) / 60000) : undefined;
   return (
     <Modal title={x ? (m?.name ?? "เครื่อง") : s.title || "การฝึก"} close={keep}>
       <div className="form" ref={scroller}>
+        {s.status === "draft" && !timerIds.length && (
+          <div className="workout-bar">
+            <dl className="workout-numbers">
+              {minutes !== undefined && minutes >= 0 && minutes <= 360 && <div><dt>เวลา</dt><dd>{minutes} นาที</dd></div>}
+              <div><dt>เซต</dt><dd>{sessionSets(s)}</dd></div>
+              <div><dt>ปริมาณ</dt><dd>{kg(sessionVolume(s))}</dd></div>
+            </dl>
+            <RestTimer key={id} sessionId={id} />
+          </div>
+        )}
         {timerIds.length ? (
           <>
             {x && <div className="detail-photo">{stretchPhoto(x.machineId)}</div>}
@@ -4434,6 +4701,7 @@ function SessionEditorForm({
             date={s.date}
             update={(v) => update(focus, v)}
             patchSet={(j, p) => patchSet(focus, j, p)}
+            toggle={(j) => toggleSet(focus, j)}
             back={() => setFocus(null)}
             go={(n) => setFocus(n)}
           />
@@ -4475,17 +4743,26 @@ function SessionEditorForm({
               <button className="primary" onClick={() => setStretchProgram("open")}>เปิดตัวจับเวลา Stretch · {stretchIds.length} ท่า</button>
             )}
             {s.source && <p className="muted">{s.source}</p>}
+            {s.status !== "draft" && s.exercises.length > 0 && (
+              <button className="secondary" onClick={() => setSummary({ ...source, data: s })}>ดูสรุปและกล้ามเนื้อ</button>
+            )}
             <div className="exercise-list">
               {s.exercises.map((x, i) => {
                 const m = entries.find((e) => e.id === x.machineId)?.data as
                   Machine | undefined;
                 const last = latestExercise(entries, x.machineId, s.date, id);
                 const done = x.sets.filter((a) => a.done);
+                const name = m?.name ?? "เครื่อง";
+                const inline = !isStretch(x.machineId) && !x.reportedOnly && !isTextLoad(x);
+                const { primary } = musclesFor(m);
+                const complete = inline ? x.sets.length > 0 && x.sets.every((a) => a.done) : done.length > 0;
                 return (
                   <div
-                    className={`exercise-item ${done.length ? "done" : ""}`}
+                    className={`exercise-item ${complete ? "done" : ""}`}
+                    id={`exercise-${x.machineId}`}
                     key={x.machineId}
                   >
+                    <div className="exercise-head">
                     <button
                       className="exercise-open"
                       aria-label={`เปิด ${m?.name ?? "เครื่อง"}`}
@@ -4496,9 +4773,10 @@ function SessionEditorForm({
                         <b>{i + 1}</b>
                       </span>
                       <span className="exercise-text">
+                        {x.superset !== undefined && <small className="superset">ซูเปอร์เซต {supersetLetter(x.superset)}</small>}
                         <strong>{m?.name ?? "ไม่ทราบเครื่อง"}</strong>
                         {x.target && <small>เป้า {targetText(x.target)} · เสร็จ {done.length}/{x.target.sets}</small>}
-                        {done.length ? (
+                        {inline ? (primary.length > 0 && <small>เน้น {muscleText(primary)}</small>) : done.length ? (
                           <small className="ok">
                             {done
                               .map((a) => formatSet(a, x.loadMode))
@@ -4522,7 +4800,7 @@ function SessionEditorForm({
                           <small className="muted">บันทึกเดิม: {x.originalName}</small>
                         )}
                       </span>
-                      {done.length ? (
+                      {complete ? (
                         <span className="state-badge">
                           <Check size={15} />
                         </span>
@@ -4530,14 +4808,53 @@ function SessionEditorForm({
                         <ChevronRight size={18} />
                       )}
                     </button>
-                    {(
-                      <button
-                        className="icon remove"
-                        aria-label={`เอา ${m?.name ?? "ท่านี้"} ออกจากการฝึก`}
-                        onClick={() => setRemoveExercise(i)}
-                      >
-                        <X size={16} />
-                      </button>
+                    <button
+                      className="icon remove"
+                      aria-label={`ตัวเลือก ${name}`}
+                      aria-expanded={menu === x.machineId}
+                      onClick={() => setMenu(menu === x.machineId ? null : x.machineId)}
+                    >
+                      <MoreHorizontal size={18} />
+                    </button>
+                    </div>
+                    {menu === x.machineId && (
+                      <div className="exercise-menu" role="group" aria-label={`ตัวเลือกของ ${name}`}>
+                        <button type="button" disabled={!i} onClick={() => moveExercise(i, -1)}>เลื่อนขึ้น</button>
+                        <button type="button" disabled={i === s.exercises.length - 1} onClick={() => moveExercise(i, 1)}>เลื่อนลง</button>
+                        {inline && (x.superset !== undefined || i < s.exercises.length - 1) && (
+                          <button type="button" onClick={() => toggleSuperset(i)}>
+                            {x.superset !== undefined ? "ออกจากซูเปอร์เซต" : "ซูเปอร์เซตกับท่าถัดไป"}
+                          </button>
+                        )}
+                        {inline && (x.loadMode === "total" || x.loadMode === "per-side") && (
+                          <button type="button" onClick={() => addWarmups(i)}>เติมเซตวอร์ม</button>
+                        )}
+                        {inline && (
+                          <label>พักท่านี้
+                            <select value={x.restSeconds ?? ""} onChange={(e) =>
+                              update(i, { ...x, restSeconds: e.target.value === "" ? undefined : Number(e.target.value) })}>
+                              <option value="">ค่าเริ่มต้น</option>
+                              {restChoices.map((seconds) => <option key={seconds} value={seconds}>{restText(seconds)}</option>)}
+                            </select>
+                          </label>
+                        )}
+                        <button type="button" className="danger-text" aria-label={`เอา ${m?.name ?? "ท่านี้"} ออกจากการฝึก`}
+                          onClick={() => setRemoveExercise(i)}>เอาออก</button>
+                      </div>
+                    )}
+                    {inline && (
+                      <div className="exercise-sets">
+                        <SetTable x={x} prefix={`${name} `} showRpe={showRpe()}
+                          previous={previousExercise(entries, x.machineId, { id, date: s.date })?.exercise}
+                          unit={x.loadMode === "per-side" || x.sets.some((a) => a.enteredAs === "perSide") ? "perSide" : "total"}
+                          patch={(j, p) => patchSet(i, j, p)}
+                          remove={(j) => update(i, { ...x, sets: x.sets.filter((_, k) => k !== j) })}
+                          toggle={(j) => toggleSet(i, j)} />
+                        <button type="button" className="text-button" aria-label={`เพิ่มเซต ${name}`}
+                          onClick={() => update(i, { ...x, sets: [...x.sets, emptySet(x.sets.at(-1))] })}>
+                          <Plus size={15} /> เพิ่มเซต
+                        </button>
+                      </div>
                     )}
                   </div>
                 );
@@ -4657,6 +4974,7 @@ function ExerciseFocus({
   date,
   update,
   patchSet,
+  toggle,
   back,
   go,
 }: {
@@ -4667,10 +4985,11 @@ function ExerciseFocus({
   date: string;
   update: (x: ExerciseLog) => void;
   patchSet: (j: number, p: Partial<SetLog>) => void;
+  toggle: (j: number) => void;
   back: () => void;
   go: (n: number) => void;
 }) {
-  const { entries, notify } = useData();
+  const { entries } = useData();
   const [inputMode, setInputMode] = useState<"total" | "perSide">(
     x.loadMode === "per-side" ? "perSide" : "total",
   );
@@ -4684,7 +5003,6 @@ function ExerciseFocus({
     textLoad = isTextLoad(x);
   const configurableLoad = x.loadMode === "total" || x.loadMode === "per-side";
   const divisor = configurableLoad && inputMode === "perSide" ? 2 : 1;
-  const unit = configurableLoad ? (divisor === 2 ? "กก./ข้าง" : "กก.") : loadLabel(x.loadMode);
   const reference = !last && m
     ? machineVariants(entries, m)
         .filter((variant) => variant.data.gym !== m.gym)
@@ -4785,7 +5103,6 @@ function ExerciseFocus({
           {" "} (คนละเครื่อง น้ำหนักอาจไม่เท่ากัน)
         </p>
       )}
-      <RestTimer key={sessionId} sessionId={sessionId} />
       {configurableLoad && !textLoad && (
         <Field label="หน่วยที่กรอก">
           <select value={inputMode} onChange={(e) => setInputMode(e.target.value === "perSide" ? "perSide" : "total")}>
@@ -4794,89 +5111,10 @@ function ExerciseFocus({
           </select>
         </Field>
       )}
-      <div className="set-table">
-        <div className="set-head">
-          <span>เซต</span>
-          <span>{textLoad ? "น้ำหนัก (ข้อความ)" : `น้ำหนัก ${unit}`}</span>
-          <span>ครั้ง</span>
-          <span>วอร์ม</span>
-          <span>เสร็จ</span>
-          <span />
-        </div>
-        {x.sets.map((a, j) => (
-          <div className={`set-row ${a.done ? "done" : ""}`} key={a.id}>
-            <span className="set-no">{x.reportedOnly ? "ผล" : j + 1}</span>
-            {textLoad ? (
-              <input
-                aria-label={`เซต ${j + 1} น้ำหนักแบบข้อความ`}
-                value={a.loadText ?? ""}
-                placeholder="เช่น 13.5 กก. + 10 ที่หมุน"
-                onChange={(e) => patchSet(j, { loadText: e.target.value })}
-              />
-            ) : (
-              <input
-                aria-label={`เซต ${j + 1} น้ำหนัก`}
-                type="number"
-                inputMode="decimal"
-                min="0"
-                step="0.1"
-                placeholder={x.loadMode === "bodyweight" ? "ตัว" : "–"}
-                value={a.load === null ? "" : totalLoad(a, x.loadMode)! / divisor}
-                disabled={x.loadMode === "bodyweight"}
-                onChange={(e) =>
-                  patchSet(j, {
-                    load: e.target.value === "" ? null : Number(e.target.value) * divisor,
-                    enteredAs: configurableLoad ? inputMode : undefined,
-                  })
-                }
-              />
-            )}
-            <input
-              aria-label={`เซต ${j + 1} จำนวนครั้ง`}
-              type="number"
-              inputMode="numeric"
-              min="1"
-              step="1"
-              placeholder="–"
-              value={a.reps ?? ""}
-              onChange={(e) =>
-                patchSet(j, {
-                  reps: e.target.value === "" ? null : Number(e.target.value),
-                })
-              }
-            />
-            <input
-              aria-label={`เซต ${j + 1} เป็นเซตวอร์ม`}
-              type="checkbox"
-              checked={a.warmup}
-              onChange={(e) => patchSet(j, { warmup: e.target.checked })}
-            />
-            <button
-              className={`set-check ${a.done ? "checked" : ""}`}
-              aria-label={`ยืนยันเซต ${j + 1}`}
-              aria-pressed={a.done}
-              onClick={() => {
-                if (!a.done && (!a.reps || !hasLoad(a, x.loadMode))) {
-                  notify("กรอกน้ำหนักและจำนวนครั้งก่อนยืนยัน");
-                  return;
-                }
-                patchSet(j, { done: !a.done });
-              }}
-            >
-              <Check size={18} />
-            </button>
-            <button
-              className="set-remove"
-              aria-label={`ลบเซต ${j + 1}`}
-              onClick={() =>
-                update({ ...x, sets: x.sets.filter((_, k) => k !== j) })
-              }
-            >
-              <X size={15} />
-            </button>
-          </div>
-        ))}
-      </div>
+      <SetTable x={x} textLoad={textLoad} unit={inputMode} showRpe={showRpe()}
+        previous={previousExercise(entries, x.machineId, { id: sessionId, date: date || today() })?.exercise}
+        patch={patchSet} toggle={toggle}
+        remove={(j) => update({ ...x, sets: x.sets.filter((_, k) => k !== j) })} />
       <div className="upload-row set-tools">
         <button
           className="secondary"

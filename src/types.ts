@@ -32,8 +32,13 @@ export interface Machine {
   photoId?: string;
   referencePhotoId?: string;
   archived?: boolean;
+  /** Set only when someone corrects the muscles worked out from the name. */
+  muscles?: { primary: string[]; secondary: string[] };
 }
 export interface SetLog {
+  type?: "drop" | "failure";
+  /** Effort from 1 to 10, recorded only when the lifter wants it. */
+  rpe?: number;
   holdSeconds?: number;
   /** Present on numeric sets stored in total kilograms. */
   enteredAs?: "total" | "perSide";
@@ -49,8 +54,13 @@ export interface ExerciseTarget {
   sets: number;
   reps: number;
   note?: string;
+  /** Seconds of rest after each set. */
+  rest?: number;
 }
 export interface ExerciseLog {
+  /** Exercises with the same number are done back to back. */
+  superset?: number;
+  restSeconds?: number;
   target?: ExerciseTarget;
   originalName?: string;
   reportedOnly?: boolean;
@@ -61,6 +71,8 @@ export interface ExerciseLog {
   loadMode: Machine["loadMode"];
 }
 export interface Session {
+  startedAt?: string;
+  endedAt?: string;
   gym?: string;
   date: string;
   title: string;

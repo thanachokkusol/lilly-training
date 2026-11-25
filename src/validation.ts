@@ -1,3 +1,4 @@
+import { muscleLabels } from "./muscles";
 import type { Entry } from "./types";
 import { reportUrl, sizingFields, sizingId, sizingTextFields } from "./bodyDetails";
 const kinds = [
@@ -18,10 +19,13 @@ export function validDate(s: unknown): s is string {
 const num = (v: unknown, max = 1e6) =>
   v === null ||
   (typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= max);
+const validRest = (rest: any) => rest === undefined || (Number.isInteger(rest) && rest >= 0 && rest <= 900);
 const validTarget = (t: any) =>
   !!t && typeof t === "object" && Number.isInteger(t.sets) && t.sets >= 1 && t.sets <= 20 &&
   Number.isInteger(t.reps) && t.reps >= 1 && t.reps <= 1000 &&
-  (t.note === undefined || (typeof t.note === "string" && t.note.length <= 500));
+  (t.note === undefined || (typeof t.note === "string" && t.note.length <= 500)) && validRest(t.rest);
+const validMuscles = (list: any) => Array.isArray(list) && list.length <= 15 &&
+  list.every((muscle) => typeof muscle === "string" && muscle in muscleLabels);
 export function validateEntry(e: Pick<Entry, "id" | "kind" | "data">) {
   if (
     typeof e.id !== "string" ||
@@ -77,7 +81,8 @@ export function validateEntry(e: Pick<Entry, "id" | "kind" | "data">) {
       typeof d.name !== "string" ||
       typeof d.gym !== "string" ||
       typeof d.setup !== "string" ||
-      !["total", "per-side", "assistance", "bodyweight"].includes(d.loadMode)
+      !["total", "per-side", "assistance", "bodyweight"].includes(d.loadMode) ||
+      (d.muscles !== undefined && (!d.muscles || !validMuscles(d.muscles.primary) || !validMuscles(d.muscles.secondary)))
     )
       throw Error("รายละเอียดเครื่องไม่ถูกต้อง");
   }
@@ -95,12 +100,15 @@ export function validateEntry(e: Pick<Entry, "id" | "kind" | "data">) {
       (d.date !== "" && !validDate(d.date)) ||
       typeof d.title !== "string" ||
       !["draft", "completed", "historical"].includes(d.status) ||
-      !Array.isArray(d.exercises)
+      !Array.isArray(d.exercises) ||
+      [d.startedAt, d.endedAt].some((at: unknown) => at !== undefined && (typeof at !== "string" || at.length > 40 || Number.isNaN(Date.parse(at))))
     )
       throw Error("ครั้งฝึกไม่ถูกต้อง");
     const ids = new Set();
     for (const x of d.exercises) {
       if (x?.target !== undefined && !validTarget(x.target)) throw Error("เป้าเซตไม่ถูกต้อง");
+      if (x && (!validRest(x.restSeconds) || (x.superset !== undefined && (!Number.isInteger(x.superset) || x.superset < 1 || x.superset > 100))))
+        throw Error("เวลาพักหรือซูเปอร์เซตไม่ถูกต้อง");
       const text = (v: unknown, max = 5000) =>
         v == null || (typeof v === "string" && v.length <= max);
       if (
@@ -123,6 +131,8 @@ export function validateEntry(e: Pick<Entry, "id" | "kind" | "data">) {
             (s.reps !== null && !Number.isInteger(s.reps)) ||
             !text(s.loadText, 200) ||
             (s.warmup != null && typeof s.warmup !== "boolean") ||
+            (s.type !== undefined && !["drop", "failure"].includes(s.type)) ||
+            (s.rpe !== undefined && !(typeof s.rpe === "number" && s.rpe >= 1 && s.rpe <= 10)) ||
             typeof s.done !== "boolean",
         )
       )
@@ -171,6 +181,7 @@ export function validateEntry(e: Pick<Entry, "id" | "kind" | "data">) {
       d.machineIds.some((id: unknown) => typeof id !== "string") ||
       new Set(d.machineIds).size !== d.machineIds.length ||
       !Array.isArray(d.days) ||
+      (d.folder !== undefined && (typeof d.folder !== "string" || d.folder.length > 60)) ||
       (d.targets !== undefined && (!d.targets || typeof d.targets !== "object" || Array.isArray(d.targets) ||
         Object.values(d.targets).some((target) => !validTarget(target)))))
   )

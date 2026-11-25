@@ -13,6 +13,7 @@ import {
 } from "recharts";
 import ExerciseChart from "./ExerciseChart";
 import TrainingCalendar from "./TrainingCalendar";
+import TrainingStats from "./TrainingStats";
 import BodyProfile from "./BodyProfile";
 import { isStretch } from "./stretchTraining";
 import { BodyMetricChart, BodyMetricDialog, type BodyMetricDetail } from "./BodyMetricChart";
@@ -112,6 +113,7 @@ export default function Progress() {
         </button>
       </Header>
       <TrainingCalendar entries={entries} />
+      <TrainingStats entries={active} />
       <section className="panel">
         <div className="section-title">
           <h2>แนวโน้มรูปร่าง</h2>

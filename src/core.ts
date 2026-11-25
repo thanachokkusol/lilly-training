@@ -28,7 +28,7 @@ export function exerciseProgress(entries: Entry[], machineIds: string[]) {
     .filter((e) => e.kind === "session" && !e.deleted && e.data.date && e.data.status !== "draft")
     .sort((a, b) => a.data.date.localeCompare(b.data.date) || a.updatedAt.localeCompare(b.updatedAt))
     .flatMap((entry) => {
-      const results = new Map<string, { best: { kg: number; reps: number; estimate: number }; heaviest: { kg: number; reps: number } }>();
+      const results = new Map<string, { best: { kg: number; reps: number; estimate: number }; heaviest: { kg: number; reps: number }; volume: number }>();
       for (const exercise of (entry.data as Session).exercises) {
         if (!allowed.has(exercise.machineId) || !["total", "per-side"].includes(exercise.loadMode)) continue;
         for (const set of exercise.sets) {
@@ -37,16 +37,17 @@ export function exerciseProgress(entries: Entry[], machineIds: string[]) {
           const point = { kg, reps: set.reps, estimate: kg * (1 + set.reps / 30) };
           const result = results.get(exercise.machineId);
           results.set(exercise.machineId, {
+            volume: exercise.reportedOnly ? 0 : (result?.volume ?? 0) + kg * set.reps,
             best: result && result.best.estimate >= point.estimate ? result.best : point,
             heaviest: result && result.heaviest.kg >= kg ? result.heaviest : point,
           });
         }
       }
-      return Array.from(results, ([machineId, { best, heaviest }]) => {
+      return Array.from(results, ([machineId, { best, heaviest, volume }]) => {
         const baseline = previous.get(machineId);
         if (baseline !== undefined) index *= best.estimate / baseline;
         previous.set(machineId, best.estimate);
-        return { date: entry.data.date as string, machineId, percent: (index - 1) * 100, best, heaviest };
+        return { date: entry.data.date as string, machineId, percent: (index - 1) * 100, best, heaviest, volume };
       });
     });
 }
@@ -134,7 +135,7 @@ export const loadText = (s: SetLog, mode: LoadMode) =>
       : s.loadText?.trim() || "ไม่ทราบน้ำหนัก";
 export const formatSet = (s: SetLog, mode: LoadMode) =>
   s.holdSeconds != null ? `ค้าง ${s.holdSeconds} วิ × ${s.reps ?? "ไม่ทราบ"} ครั้ง` :
-    `${loadText(s, mode)} × ${s.reps ?? "ไม่ทราบ"} ครั้ง`;
+    `${loadText(s, mode)} × ${s.reps ?? "ไม่ทราบ"} ครั้ง${s.type === "drop" ? " (ดรอป)" : s.type === "failure" ? " (จนหมดแรง)" : ""}`;
 /** A set has a usable load when it is bodyweight, numeric, or kept as the original text. */
 export const hasLoad = (s: SetLog, mode: LoadMode) =>
   mode === "bodyweight" || s.load !== null || !!s.loadText?.trim();

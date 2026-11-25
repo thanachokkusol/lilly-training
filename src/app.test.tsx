@@ -351,6 +351,7 @@ it("starts a session, logs two sets in the focused machine view, and reopens the
   fireEvent.click(screen.getByRole("button", { name: "ยืนยันเซต 2" }));
   fireEvent.click(screen.getByRole("button", { name: "กลับรายการ" }));
   fireEvent.click(await screen.findByRole("button", { name: "จบการฝึก" }));
+  fireEvent.click(await screen.findByRole("button", { name: "เสร็จ" }));
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   const stored = (await allEntries()).find(
     (e) => e.kind === "session" && e.data.title === "Regression Session",
@@ -431,6 +432,69 @@ it("attaches a pasted image to the cardio log as evidence", async () => {
     cleanup();
   }
 });
+it("logs every exercise on one screen with last time beside each set, rests by itself and reports a record", async () => {
+  const press = { name: "Chest Press", thai: "", gym: "WE Fitness", group: "อก", setup: "", cues: "", loadMode: "total" };
+  await save("machine", press, "press");
+  await save("machine", { ...press, name: "Seated Cable Row", group: "หลัง" }, "row");
+  await save("session", {
+    date: "2026-01-10", title: "Old", status: "completed", note: "", gym: "WE Fitness", exercises: [
+      { machineId: "press", loadMode: "total", setup: "", note: "", sets: [
+        { id: "w", load: 10, reps: 15, warmup: true, done: true },
+        { id: "a", load: 20, reps: 12, warmup: false, done: true },
+        { id: "b", load: 22.5, reps: 10, warmup: false, done: true }] }],
+  }, "old");
+  await save("routine", { title: "Push Pull", machineIds: ["press", "row"], days: [], folder: "WE",
+    targets: { press: { sets: 2, reps: 12, rest: 45 } } }, "routine-test");
+  location.hash = "#today";
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Push Pull.*WE · 2 ท่า/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "เริ่มบันทึก 2 ท่า" }));
+  await screen.findByText(/เสร็จ 0\/2 ท่า/);
+  // The warm-up from last time is not offered for a working set.
+  fireEvent.click(screen.getByRole("button", { name: "Chest Press เซต 1 ใช้ค่าครั้งก่อน 20×12" }));
+  expect(screen.getByRole("spinbutton", { name: "Chest Press เซต 1 น้ำหนัก" })).toHaveProperty("value", "20");
+  fireEvent.click(screen.getByRole("button", { name: "ยืนยันChest Press เซต 1" }));
+  expect(await screen.findByText(/^พัก 0:4[45]$/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "เพิ่ม 15 วิ" }));
+  expect(screen.getByText(/^พัก (1:00|0:59)$/)).toBeTruthy();
+  fireEvent.change(screen.getByRole("spinbutton", { name: "Chest Press เซต 2 น้ำหนัก" }), { target: { value: "25" } });
+  fireEvent.click(screen.getByRole("button", { name: "ยืนยันChest Press เซต 2" }));
+  expect(await screen.findByText(/สถิติใหม่ Chest Press: น้ำหนักมากสุด/)).toBeTruthy();
+  // Set type, superset and an empty row that must not be confirmed.
+  fireEvent.click(screen.getByRole("button", { name: "Chest Press เซต 2 ชนิด ปกติ" }));
+  fireEvent.click(screen.getByRole("button", { name: "จนหมดแรง" }));
+  fireEvent.click(screen.getByRole("button", { name: "ตัวเลือก Chest Press" }));
+  fireEvent.click(screen.getByRole("button", { name: "ซูเปอร์เซตกับท่าถัดไป" }));
+  expect(screen.getAllByText("ซูเปอร์เซต A")).toHaveLength(2);
+  fireEvent.click(screen.getByRole("button", { name: "ยืนยันSeated Cable Row เซต 1" }));
+  expect(await screen.findByText("กรอกน้ำหนักและจำนวนครั้งก่อนยืนยัน")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "จบการฝึก" }));
+  const summary = await screen.findByRole("dialog", { name: "สรุปการฝึก" });
+  expect(within(summary).getByText(/\+2.5 กก\. · ปริมาณ/)).toBeTruthy();
+  expect(within(summary).getByRole("img", { name: /กล้ามเนื้อที่ใช้: อก/ })).toBeTruthy();
+  const stored = (await allEntries()).find((e) => e.data.title === "Push Pull" && e.kind === "session")!.data;
+  expect(stored.status).toBe("completed");
+  expect(Date.parse(stored.endedAt)).toBeGreaterThanOrEqual(Date.parse(stored.startedAt));
+  expect(stored.exercises[0].sets.map((set: any) => [set.load, set.reps, set.done, set.type])).toEqual([[20, 12, true, undefined], [25, 12, true, "failure"]]);
+  expect(stored.exercises.map((x: any) => x.superset)).toEqual([1, 1]);
+  expect(stored.exercises[1].sets[0].done).toBe(false);
+});
+it("edits sets, repetitions, rest and folder of a program", async () => {
+  await save("machine", { name: "Leg Press", thai: "", gym: "WE Fitness", group: "ขา", setup: "", cues: "", loadMode: "total" }, "leg");
+  await save("routine", { title: "Legs", machineIds: ["leg"], days: [], targets: { leg: { sets: 3, reps: 12, note: "ช้า" } } }, "legs");
+  location.hash = "#settings";
+  render(<App />);
+  const row = (await screen.findByText("Legs")).closest<HTMLElement>(".trash-row")!;
+  fireEvent.click(within(row).getByRole("button", { name: "แก้ไข" }));
+  const dialog = await topDialog();
+  fireEvent.change(dialog.getByLabelText("Leg Press จำนวนเซตเป้า"), { target: { value: "4" } });
+  fireEvent.change(dialog.getByLabelText("Leg Press เวลาพัก"), { target: { value: "120" } });
+  fireEvent.change(dialog.getByLabelText("โฟลเดอร์ (ถ้ามี)"), { target: { value: "WE" } });
+  fireEvent.click(dialog.getByRole("button", { name: "บันทึกโปรแกรม" }));
+  await waitFor(async () => expect((await allEntries()).find((e) => e.id === "legs")?.data).toMatchObject({
+    folder: "WE", machineIds: ["leg"], targets: { leg: { sets: 4, reps: 12, note: "ช้า", rest: 120 } },
+  }));
+});
 it("shows a client's workout without any control that could change it", async () => {
   const metadata = { version: 1, updatedAt: "2026-11-24T00:00:00Z", dirty: false };
   const close = vi.fn();
@@ -455,7 +519,7 @@ it("shows a client's workout without any control that could change it", async ()
   expect(dialog.queryByText(/99/)).toBeNull();
   expect(dialog.queryAllByRole("textbox")).toHaveLength(0);
   expect(dialog.queryAllByRole("spinbutton")).toHaveLength(0);
-  expect(dialog.getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual(["ปิด", "คัดลอกสรุปเวท"]);
+  expect(dialog.getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual(["ปิด", "ดูสรุปและกล้ามเนื้อ", "คัดลอกสรุปเวท"]);
   fireEvent.click(dialog.getByRole("button", { name: "ปิด" }));
   expect(close).toHaveBeenCalledOnce();
 });

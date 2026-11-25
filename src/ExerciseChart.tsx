@@ -8,7 +8,8 @@ const color = (gym: string) =>
   ({ "WE Fitness": "#476c4c", Jett: "#925e32", "M Fitness": "#4864a3" })[gym] ?? "#715192";
 
 export default function ExerciseChart({ entries, machines }: { entries: Entry[]; machines: Entry[] }) {
-  const [actual, setActual] = useState(false);
+  const [mode, setMode] = useState<"percent" | "weight" | "max" | "volume">("percent");
+  const actual = mode !== "percent";
   const [filter, setFilter] = useState("");
   const selected = machines.filter((m) => !actual || !filter || m.id === filter);
   const byId = new Map(machines.map((m) => [m.id, m]));
@@ -18,8 +19,9 @@ export default function ExerciseChart({ entries, machines }: { entries: Entry[];
     <section className="panel">
       <h2>ความก้าวหน้ารายท่า</h2>
       <div className="chips">
-        <button aria-pressed={!actual} onClick={() => setActual(false)}>% ความก้าวหน้า</button>
-        <button aria-pressed={actual} onClick={() => setActual(true)}>น้ำหนักจริง</button>
+        {([["percent", "% ความก้าวหน้า"], ["weight", "น้ำหนักจริง"], ["max", "1RM โดยประมาณ"], ["volume", "ปริมาณ"]] as const).map(([key, text]) => (
+          <button key={key} className={mode === key ? "selected" : ""} aria-pressed={mode === key} onClick={() => setMode(key)}>{text}</button>
+        ))}
         {actual && (
           <select aria-label="กรองเครื่องในกราฟ" value={filter} onChange={(e) => setFilter(e.target.value)}>
             <option value="">ทุกเครื่อง</option>
@@ -38,16 +40,19 @@ export default function ExerciseChart({ entries, machines }: { entries: Entry[];
                 const point = payload?.[0]?.payload as (typeof points)[number] | undefined;
                 const machine = point && byId.get(point.machineId);
                 if (!active || !point || !machine) return null;
-                const set = actual ? point.heaviest : point.best;
+                const set = mode === "weight" || mode === "volume" ? point.heaviest : point.best;
                 return <div className="chart-tip">
                   {dateLabel(point.date)} · {label(machine)}<br />
                   {set.kg} กก. × {set.reps} ครั้ง
-                  {!actual && <> · {point.percent.toFixed(1)}%</>}
+                  {mode === "percent" && <> · {point.percent.toFixed(1)}%</>}
+                  {mode === "max" && <> · 1RM ประมาณ {point.best.estimate.toFixed(1)} กก.</>}
+                  {mode === "volume" && <> · ปริมาณ {point.volume.toLocaleString("th-TH")} กก.</>}
                 </div>;
               }} />
               {actual ? selected.map((m) => (
                 <Line key={m.id} name={label(m)}
-                  dataKey={(p: (typeof points)[number]) => p.machineId === m.id ? p.heaviest.kg : null}
+                  dataKey={(p: (typeof points)[number]) => p.machineId !== m.id ? null :
+                    mode === "max" ? Number(p.best.estimate.toFixed(1)) : mode === "volume" ? p.volume || null : p.heaviest.kg}
                   stroke={color(m.data.gym)} connectNulls />
               )) : (
                 <Line dataKey="percent" stroke="#476c4c" dot={({ cx, cy, payload }) => (
