@@ -1,5 +1,5 @@
 // Supabase Edge Function: member-signup
-// Public sign-up for friends, allowed only with the owner's invite code.
+// Public sign-up for friends while the owner keeps sign-up open (Settings → การสมัครสมาชิก).
 // Accounts made here are always "friend" (never coach or owner).
 // Deploy with "Verify JWT" off: callers are not signed in yet.
 // The request logic is a plain function so it can be tested without Deno or Supabase.
@@ -25,21 +25,18 @@ export async function handleSignup(req: Request, admin: any): Promise<Response> 
   } catch {
     return fail("ข้อมูลไม่ถูกต้อง");
   }
-  const code = String(body?.inviteCode ?? "").trim();
   const username = String(body?.username ?? "").trim().toLowerCase();
   const displayName = String(body?.displayName ?? "").trim().slice(0, 80);
   const password = body?.password;
 
-  const { data: settings } = await admin.from("signup_settings").select("enabled,invite_code").maybeSingle();
-  // Same message for "closed" and "wrong code" so the code cannot be probed.
-  if (!settings?.enabled || !settings.invite_code || code !== settings.invite_code)
-    return fail("รหัสเชิญไม่ถูกต้อง หรือยังไม่เปิดรับสมัคร", 403);
+  const { data: settings } = await admin.from("signup_settings").select("enabled").maybeSingle();
+  if (!settings?.enabled) return fail("ตอนนี้ปิดรับสมัครอยู่ ติดต่อเจ้าของสมุด", 403);
   if (!displayName) return fail("กรอกชื่อที่แสดง");
   if (!USERNAME.test(username)) return fail("ชื่อผู้ใช้ใช้ได้เฉพาะ a-z 0-9 . _ - ยาว 3–32 ตัว");
   if (typeof password !== "string" || password.length < 8 || password.length > 72)
     return fail("รหัสผ่านต้องยาว 8–72 ตัวอักษร");
 
-  // Simple brake against abuse of a leaked code.
+  // Simple brake against mass sign-ups.
   const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
   const { count } = await admin.from("profiles").select("id", { count: "exact", head: true })
     .eq("role", "friend").gte("created_at", since);

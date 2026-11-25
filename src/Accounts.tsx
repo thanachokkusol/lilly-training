@@ -7,7 +7,7 @@ import {
   setMyCoach,
   getSignupSettings,
   setSignupSettings,
-  signUpWithInvite,
+  signUp,
   type Profile,
   type Client,
   type Coach,
@@ -331,71 +331,39 @@ export function MyCoaches() {
   );
 }
 
-const randomInvite = () => {
-  const words = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  const pick = (n: number) =>
-    Array.from(crypto.getRandomValues(new Uint8Array(n)), (v) => words[v % words.length]).join("");
-  return `LILLY-${pick(4)}-${pick(4)}`;
-};
-
-/** Owner: open or close self sign-up and set the invite code to share. */
+/** Owner: open or close self sign-up. */
 export function SignupSettings() {
   const { run } = useData();
-  const [state, setState] = useState<{ enabled: boolean; inviteCode: string } | null>(null);
-  const [code, setCode] = useState("");
+  const [enabled, setEnabled] = useState<boolean | null>(null);
   useEffect(() => {
     void getSignupSettings()
-      .then((s) => {
-        setState(s);
-        setCode(s.inviteCode);
-      })
-      .catch(() => setState({ enabled: false, inviteCode: "" }));
+      .then((s) => setEnabled(s.enabled))
+      .catch(() => setEnabled(false));
   }, []);
-  if (!state) return null;
-  const apply = (enabled: boolean, next: string) =>
+  if (enabled === null) return null;
+  const apply = (next: boolean) =>
     run(async () => {
-      await setSignupSettings(enabled, next);
-      setState({ enabled, inviteCode: next });
-      setCode(next);
-    }, enabled ? "เปิดรับสมัครแล้ว ส่งรหัสเชิญให้เพื่อนได้เลย" : "ปิดรับสมัครแล้ว");
+      await setSignupSettings(next);
+      setEnabled(next);
+    }, next ? "เปิดรับสมัครแล้ว ส่งลิงก์เว็บให้เพื่อนได้เลย" : "ปิดรับสมัครแล้ว");
   return (
     <section className="panel">
       <div className="section-title">
         <div>
           <h2>การสมัครสมาชิก</h2>
           <p>
-            {state.enabled
-              ? "เปิดรับสมัครอยู่ · เพื่อนสมัครเองได้ที่หน้าเข้าสู่ระบบโดยใช้รหัสเชิญ"
+            {enabled
+              ? "เปิดรับสมัครอยู่ · ใครมีลิงก์เว็บก็กด สมัครสมาชิก ที่หน้าเข้าสู่ระบบได้"
               : "ปิดรับสมัคร · มีแต่บัญชีที่สร้างแล้วเท่านั้นที่เข้าได้"}
           </p>
         </div>
-      </div>
-      <label className="field">
-        <span>รหัสเชิญ (ส่งให้เฉพาะคนที่ชวน)</span>
-        <input value={code} onChange={(e) => setCode(e.target.value.trim())} autoCapitalize="characters" spellCheck={false} />
-      </label>
-      <div className="upload-row">
-        <button type="button" className="text-button" onClick={() => setCode(randomInvite())}>
-          สุ่มรหัสใหม่
+        <button className={enabled ? "secondary" : "primary"} onClick={() => apply(!enabled)}>
+          {enabled ? "ปิดรับสมัคร" : "เปิดรับสมัคร"}
         </button>
-        {state.enabled ? (
-          <>
-            <button className="secondary" onClick={() => apply(true, code)} disabled={code === state.inviteCode}>
-              บันทึกรหัส
-            </button>
-            <button className="secondary" onClick={() => apply(false, code)}>
-              ปิดรับสมัคร
-            </button>
-          </>
-        ) : (
-          <button className="primary" onClick={() => apply(true, code || randomInvite())}>
-            เปิดรับสมัคร
-          </button>
-        )}
       </div>
       <p className="muted">
         บัญชีที่สมัครเองเป็น "เพื่อน" เห็นเครื่องและโปรแกรมกองกลาง และบันทึกของตัวเองเท่านั้น
-        ส่วนบัญชีโค้ชสร้างได้จากหัวข้อบัญชีด้านล่าง เปลี่ยนรหัสเชิญเมื่อไหร่ รหัสเก่าก็ใช้สมัครไม่ได้ทันที
+        ไม่เห็นบันทึกของคนอื่น · บัญชีโค้ชสร้างได้จากหัวข้อบัญชีด้านล่าง · ปิดรับสมัครได้ทุกเมื่อเมื่อเพื่อนสมัครครบ
       </p>
     </section>
   );
@@ -415,8 +383,7 @@ export function SignupForm({ close, back, done }: { close: () => void; back: () 
             if (f.get("password") !== f.get("again")) throw Error("รหัสผ่านสองช่องไม่ตรงกัน");
             setBusy(true);
             try {
-              await signUpWithInvite({
-                inviteCode: String(f.get("invite")).trim(),
+              await signUp({
                 username: String(f.get("username")).trim().toLowerCase(),
                 displayName: String(f.get("displayName")).trim(),
                 password: String(f.get("password")),
@@ -428,10 +395,6 @@ export function SignupForm({ close, back, done }: { close: () => void; back: () 
           }, "สมัครเรียบร้อย ยินดีต้อนรับค่ะ");
         }}
       >
-        <label className="field">
-          <span>รหัสเชิญ (ขอจากเจ้าของสมุด)</span>
-          <input name="invite" required autoCapitalize="characters" spellCheck={false} autoComplete="off" />
-        </label>
         <label className="field">
           <span>ชื่อที่แสดง</span>
           <input name="displayName" required maxLength={80} placeholder="ชื่อเล่น" />

@@ -202,6 +202,9 @@ describe.sequential("database access controls and optimistic writes", () => {
     await expect(db.query(`select public.set_signup_settings(true, 'x')`)).rejects.toThrow("Invalid invite code");
     await db.query(`select public.set_signup_settings(true, 'lilly-2026')`);
     expect((await db.query<any>(`select * from public.get_signup_settings()`)).rows[0]).toEqual({ enabled: true, invite_code: "lilly-2026" });
+    // Sign-up can be open without any code.
+    await db.query(`select public.set_signup_settings(true, null)`);
+    expect((await db.query<any>(`select * from public.get_signup_settings()`)).rows[0]).toEqual({ enabled: true, invite_code: null });
     await identity(trainer);
     await expect(db.exec(`select * from public.signup_settings`)).rejects.toThrow();
   });

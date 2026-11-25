@@ -65,6 +65,8 @@ import {
   alignOctoberWalkWeeks,
   removeEmptyNovemberPulldown,
   addBundledMachinePhotos,
+  adoptLocalAccount,
+  clearLocalAccount,
 } from "./db";
 import {
   today,
@@ -548,9 +550,13 @@ export default function App() {
           const c = (await cloud())!;
           const { data, error } = await c.rpc("is_training_owner");
           if (live && n === generation) {
-            if (!error && data === true)
+            const member = !error && data === true;
+            // Signing in as a different account replaces this browser's local copy (when nothing is unsynced).
+            if (member && (await adoptLocalAccount(session.user.id))) {
               localStorage.removeItem("lilly-locked");
-            setAuthUser(!error && data === true ? session.user.id : "");
+              await refresh();
+            }
+            if (live && n === generation) setAuthUser(member ? session.user.id : "");
           }
         } catch {
           if (live && n === generation)
@@ -3517,7 +3523,7 @@ function Login({ close, done }: { close: () => void; done: () => void }) {
           ติดต่อเจ้าของสมุดเพื่อตั้งรหัสใหม่
         </details>
         <button type="button" className="secondary" onClick={() => setSignup(true)}>
-          สมัครสมาชิก (ใช้รหัสเชิญ)
+          สมัครสมาชิก
         </button>
       </form>
     </Modal>
@@ -3699,11 +3705,14 @@ function SettingsPage({
   }
   const showOwnerSettings = !cfg || profile?.role === "owner";
   const signOut = () => run(async () => {
-    if (entries.some((entry) => entry.dirty))
-      notify("รายการรอซิงก์ยังอยู่ในเครื่อง จะส่งเมื่อกลับเข้าบัญชีเดิม");
-    localStorage.setItem("lilly-locked", "true");
     const result = await (await cloud())?.auth.signOut({ scope: "local" });
     if (result?.error) throw result.error;
+    // Remove this account's copy from the browser so the next person can sign in cleanly.
+    const cleared = await clearLocalAccount();
+    if (!cleared) {
+      localStorage.setItem("lilly-locked", "true");
+      notify("รายการรอซิงก์ยังอยู่ในเครื่อง จะส่งเมื่อกลับเข้าบัญชีเดิม");
+    }
     setUser("");
   }, "ออกจากระบบแล้ว");
   return (

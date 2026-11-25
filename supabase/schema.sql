@@ -196,7 +196,7 @@ end; $$;
 revoke all on function public.set_my_coach(uuid, boolean) from public, anon;
 grant execute on function public.set_my_coach(uuid, boolean) to authenticated;
 
--- Self sign-up is only possible with the owner's invite code, checked by the member-signup Edge Function.
+-- Self sign-up (member-signup Edge Function) works only while the owner keeps it open. invite_code is no longer used.
 create table if not exists public.signup_settings (
  singleton boolean primary key default true check (singleton),
  enabled boolean not null default false,
@@ -225,7 +225,7 @@ create or replace function public.set_signup_settings(new_enabled boolean, new_c
 language plpgsql security definer set search_path = '' as $$
 begin
  if public.journal_role() is distinct from 'owner' then raise exception 'Unauthorized'; end if;
- if new_enabled and (new_code is null or new_code !~ '^[A-Za-z0-9-]{6,64}$') then raise exception 'Invalid invite code'; end if;
+ if new_code is not null and new_code !~ '^[A-Za-z0-9-]{6,64}$' then raise exception 'Invalid invite code'; end if;
  insert into public.signup_settings(singleton, enabled, invite_code, updated_at) values (true, new_enabled, new_code, now())
   on conflict (singleton) do update set enabled = excluded.enabled, invite_code = excluded.invite_code, updated_at = now();
 end; $$;

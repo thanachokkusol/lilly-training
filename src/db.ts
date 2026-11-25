@@ -473,3 +473,28 @@ export async function exportCSV() {
     { type: "text/csv;charset=utf-8" },
   );
 }
+
+/**
+ * This browser keeps a local copy of one account's journal. Wipe it so another account can
+ * sign in, unless it still holds changes that have not reached the cloud yet.
+ * Returns false (and changes nothing) when unsynced changes would be lost.
+ */
+export async function clearLocalAccount(): Promise<boolean> {
+  const d = await db;
+  const entries = (await d.getAll("entries")) as Entry[];
+  if (entries.some((e) => e.dirty)) return false;
+  const tx = d.transaction(["entries", "photos"], "readwrite");
+  await Promise.all([tx.objectStore("entries").clear(), tx.objectStore("photos").clear(), tx.done]);
+  try {
+    for (const key of Object.keys(localStorage))
+      if (key.startsWith("lilly-") && key !== "lilly-cloud") localStorage.removeItem(key);
+  } catch { /* storage may be unavailable; the database is already clear */ }
+  return true;
+}
+/** Make this browser's local copy belong to `userId`, clearing another account's copy if safe. */
+export async function adoptLocalAccount(userId: string): Promise<boolean> {
+  const bound = localStorage.getItem("lilly-owner");
+  if (bound && bound !== userId && !(await clearLocalAccount())) return false;
+  localStorage.setItem("lilly-owner", userId);
+  return true;
+}

@@ -7,6 +7,7 @@ import {
   storePhoto,
   clearPhotoBlob,
   sandbox,
+  adoptLocalAccount,
 } from "./db";
 import { validateEntry } from "./validation";
 import type { Entry } from "./types";
@@ -86,10 +87,8 @@ export async function sync(onRecordsReady?: () => Promise<void>) {
   const { data: allowed, error: ownerError } = await c.rpc("is_training_owner");
   if (ownerError || allowed !== true)
     throw Error("บัญชีนี้ยังไม่ได้รับสิทธิ์ใช้สมุดฝึก");
-  const bound = localStorage.getItem("lilly-owner");
-  if (bound && bound !== user.id)
-    throw Error("ข้อมูลในเครื่องผูกกับบัญชีอื่น กรุณาส่งออกและใช้เบราว์เซอร์แยกบัญชี");
-  localStorage.setItem("lilly-owner", user.id);
+  if (!(await adoptLocalAccount(user.id)))
+    throw Error("เครื่องนี้ยังมีรายการรอซิงก์ของบัญชีก่อนหน้า เข้าบัญชีเดิมให้ซิงก์เสร็จก่อน แล้วค่อยสลับบัญชี");
   localStorage.setItem("lilly-owner-project", config()!.url);
   syncing = true;
   let pushed = 0,
@@ -313,14 +312,14 @@ export async function getSignupSettings(): Promise<{ enabled: boolean; inviteCod
   const row = Array.isArray(data) ? data[0] : data;
   return { enabled: !!row?.enabled, inviteCode: row?.invite_code ?? "" };
 }
-export async function setSignupSettings(enabled: boolean, inviteCode: string) {
+export async function setSignupSettings(enabled: boolean) {
   const c = await cloud();
   if (!c) throw Error("ยังไม่ได้เชื่อม Supabase");
-  const { error } = await c.rpc("set_signup_settings", { new_enabled: enabled, new_code: inviteCode.trim() || null });
-  if (error) throw Error(/Invalid invite/.test(error.message) ? "รหัสเชิญใช้ A-Z a-z 0-9 และ - ยาว 6–64 ตัว" : error.message);
+  const { error } = await c.rpc("set_signup_settings", { new_enabled: enabled, new_code: null });
+  if (error) throw error;
 }
-/** Create a friend account with the owner's invite code, then sign in. */
-export async function signUpWithInvite(input: { inviteCode: string; username: string; displayName: string; password: string }) {
+/** Create a friend account (only while the owner keeps sign-up open), then sign in. */
+export async function signUp(input: { username: string; displayName: string; password: string }) {
   const c = await cloud();
   if (!c) throw Error("ยังไม่ได้เชื่อม Supabase");
   const { data, error } = await c.functions.invoke("member-signup", { body: input });

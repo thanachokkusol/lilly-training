@@ -5,7 +5,7 @@ type Profile = { id: string; username: string; display_name: string; role: strin
 
 /** Minimal in-memory stand-in for the parts of the Supabase admin client the function uses. */
 function fakeAdmin(opts: {
-  settings?: { enabled: boolean; invite_code: string | null } | null;
+  settings?: { enabled: boolean; invite_code?: string | null } | null;
   profiles?: Profile[];
   failProfileInsert?: boolean;
 }) {
@@ -72,8 +72,8 @@ function fakeAdmin(opts: {
   };
   return { admin, state };
 }
-const open = { enabled: true, invite_code: "LILLY-AB12-CD34" };
-const good = { inviteCode: "LILLY-AB12-CD34", username: "Mint.Run", displayName: "มิ้นท์", password: "longenough1" };
+const open = { enabled: true, invite_code: null };
+const good = { username: "Mint.Run", displayName: "มิ้นท์", password: "longenough1" };
 const call = async (admin: unknown, body: unknown, method = "POST") => {
   const res = await handleSignup(
     new Request("https://x/functions/v1/member-signup", {
@@ -86,7 +86,7 @@ const call = async (admin: unknown, body: unknown, method = "POST") => {
 };
 
 describe("member-signup", () => {
-  it("creates a friend account with the right invite code", async () => {
+  it("creates a friend account while sign-up is open, without any code", async () => {
     const { admin, state } = fakeAdmin({ settings: open });
     const r = await call(admin, good);
     expect(r).toEqual({ status: 200, body: { ok: true, username: "mint.run" } });
@@ -98,16 +98,12 @@ describe("member-signup", () => {
     await call(admin, { ...good, role: "owner" });
     expect(state.profiles[0].role).toBe("friend");
   });
-  it("rejects when sign-up is closed, unset, or the code is wrong, with the same message", async () => {
-    for (const settings of [null, { enabled: false, invite_code: "LILLY-AB12-CD34" }, { enabled: true, invite_code: null }]) {
+  it("rejects every sign-up while sign-up is closed or never opened", async () => {
+    for (const settings of [null, { enabled: false, invite_code: null }]) {
       const { admin, state } = fakeAdmin({ settings });
-      const r = await call(admin, good);
-      expect(r.status).toBe(403);
+      expect(await call(admin, good)).toEqual({ status: 403, body: { error: "ตอนนี้ปิดรับสมัครอยู่ ติดต่อเจ้าของสมุด" } });
       expect(state.users).toHaveLength(0);
     }
-    const { admin } = fakeAdmin({ settings: open });
-    const wrong = await call(admin, { ...good, inviteCode: "LILLY-AB12-CD35" });
-    expect(wrong).toEqual({ status: 403, body: { error: "รหัสเชิญไม่ถูกต้อง หรือยังไม่เปิดรับสมัคร" } });
   });
   it("validates name, username and password before creating anything", async () => {
     const cases = [
