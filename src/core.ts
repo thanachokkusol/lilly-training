@@ -50,13 +50,13 @@ export function exerciseProgress(entries: Entry[], machineIds: string[]) {
       });
     });
 }
-export const today = () =>
+export const today = (at = new Date()) =>
   new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Bangkok",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).format(new Date());
+  }).format(at);
 export function addDays(date: string, n: number) {
   const d = new Date(date + "T12:00:00Z");
   d.setUTCDate(d.getUTCDate() + n);

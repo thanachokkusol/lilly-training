@@ -127,6 +127,18 @@ describe.sequential("database access controls and optimistic writes", () => {
     const row = await db.query<any>(`select payload->>'setup' s, shared from public.training_records where id='we-chest'`);
     expect(row.rows).toEqual([{ s: "x", shared: true }]);
   });
+  it("tells members who last changed a shared machine, and nothing about private records", async () => {
+    const editorOf = async (id: string) =>
+      (await db.query<any>(`select display_name from public.shared_machine_editor('${id}')`)).rows;
+    await identity(owner);
+    expect(await editorOf("we-chest")).toEqual([{ display_name: "Coach" }]);
+    expect(await editorOf("cardio-1")).toEqual([]);
+    await identity(other);
+    expect(await editorOf("we-chest")).toEqual([]);
+    await db.exec(`reset role;set app.uid='';set role anon;`);
+    await expect(editorOf("we-chest")).rejects.toThrow();
+    await db.exec("reset role");
+  });
   it("unlinked, revoked and disabled trainers cannot read private records", async () => {
     await identity(stranger);
     expect(

@@ -104,6 +104,7 @@ import {
   myClients,
   fetchUserRecords,
   remotePhoto,
+  machineEditor,
   currentProfile,
   type Profile,
   type Client,
@@ -1619,6 +1620,14 @@ function MachineDetail({ id, close, selectMachine }: {
     [session, setSession] = useState<string | null>(null);
   const touchStart = useRef<number | null>(null);
   const body = useRef<HTMLDivElement>(null);
+  const [editor, setEditor] = useState<{ name: string; at: string } | null>(null);
+  const cloudVersion = e?.version ?? 0;
+  useEffect(() => {
+    let live = true;
+    setEditor(null);
+    if (cloudVersion) void machineEditor(id).then((found) => { if (live) setEditor(found); });
+    return () => { live = false; };
+  }, [id, cloudVersion]);
   const guide = e ? exerciseGuide(e.data.name) : undefined;
   const hasBundledPhotos = !guide || exerciseGuideFrames(guide).every((frame) =>
     entries.some((item) => item.id === `guide-photo-${id}-${frame}`),
@@ -1738,6 +1747,7 @@ function MachineDetail({ id, close, selectMachine }: {
           </small>
           <h3>{m.name}</h3>
           {m.thai && <p className="muted">{m.thai}</p>}
+          {editor && <small className="muted">แก้ล่าสุดโดย {editor.name} · {dateLabel(today(new Date(editor.at)))}</small>}
         </div>
         <div className="info-grid">
           <div className="previous">

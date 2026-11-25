@@ -356,6 +356,18 @@ export async function fetchUserRecords(userId: string): Promise<Entry[]> {
   }
   return out;
 }
+/** Who last changed a shared machine. Optional information: null when offline or not available. */
+export async function machineEditor(id: string): Promise<{ name: string; at: string } | null> {
+  try {
+    const c = await cloud();
+    if (!c || !navigator.onLine) return null;
+    const { data, error } = await c.rpc("shared_machine_editor", { record_id: id });
+    const row = Array.isArray(data) ? data[0] : data;
+    return error || !row ? null : { name: row.display_name, at: row.updated_at };
+  } catch {
+    return null;
+  }
+}
 /** Photo of a record not stored on this device (e.g. a client's evidence). */
 const pendingPhotos = new Map<string, Promise<Blob | undefined>>();
 export function remotePhoto(path: string) {

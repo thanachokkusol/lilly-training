@@ -171,6 +171,15 @@ grant execute on function public.set_my_display_name(text) to authenticated;
 insert into public.profiles(id, role, display_name)
  select user_id, 'owner', '' from public.training_owners on conflict (id) do nothing;
 
+-- Machine cards show who last changed the shared machine. Only the name and time are returned, and only to members.
+create or replace function public.shared_machine_editor(record_id text) returns table(display_name text, updated_at timestamptz)
+language sql stable security definer set search_path = '' as $$
+ select coalesce(nullif(p.display_name, ''), p.username, case when p.role = 'owner' then 'เจ้าของสมุด' else 'สมาชิก' end), r.updated_at
+ from public.training_records r left join public.profiles p on p.id = coalesce(r.updated_by, r.user_id)
+ where public.is_training_owner() and r.shared and r.kind = 'machine' and r.id = record_id; $$;
+revoke all on function public.shared_machine_editor(text) from public, anon;
+grant execute on function public.shared_machine_editor(text) to authenticated;
+
 -- Coaches: any member chooses which coaches may view their journal (read-only).
 create or replace function public.list_coaches() returns table(id uuid, display_name text, coaching_me boolean)
 language sql stable security definer set search_path = '' as $$
