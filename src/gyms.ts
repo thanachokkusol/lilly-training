@@ -1,6 +1,6 @@
 import type { Entry } from "./types";
 
-export type Gym = { id: string; name: string; shortCode: string; archived: boolean };
+export type Gym = { id: string; name: string; shortCode: string; archived: boolean; removed?: boolean };
 export const gymCatalogId = "settings-gym-catalog";
 
 const defaults: Gym[] = [
@@ -19,7 +19,14 @@ export function gymsFor(entries: Entry[]): Gym[] {
     if (typeof id === "string" && id && !gyms.has(id))
       gyms.set(id, { id, name: id, shortCode: "", archived: false });
   }
-  return [...gyms.values()];
+  return [...gyms.values()].filter((gym) => !gym.removed);
+}
+/** A gym can be removed once nothing in use or in any workout belongs to it. */
+export function gymInUse(entries: Entry[], id: string) {
+  const machines = new Map(entries.filter((e) => e.kind === "machine" && e.data.gym === id).map((e) => [e.id, e]));
+  return [...machines.values()].some((e) => !e.deleted && !e.data.archived) || entries.some((e) =>
+    e.kind === "session" && !e.deleted && (e.data.gym === id ||
+      e.data.exercises.some((x: { machineId: string }) => machines.has(x.machineId))));
 }
 
 export function gymName(entries: Entry[], id: string) {

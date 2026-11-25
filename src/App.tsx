@@ -67,6 +67,7 @@ import {
   alignOctoberWalkWeeks,
   removeEmptyNovemberPulldown,
   addBundledMachinePhotos,
+  removeGym,
   adoptLocalAccount,
   clearLocalAccount,
 } from "./db";
@@ -131,14 +132,15 @@ const isSharedEntry = (e: Entry) =>
   (e.kind === "photo" && !!e.data?.machineId);
 const Progress = lazy(() => import("./Progress"));
 import ExerciseChart from "./ExerciseChart";
-import { gymCatalogId, gymName, gymsFor, type Gym } from "./gyms";
+import { gymCatalogId, gymInUse, gymName, gymsFor, type Gym } from "./gyms";
 import { planSessionMove, type MachineMove } from "./migration";
 import { recoverFormDraft } from "./formDraft";
 import { exerciseDemoLink, exerciseGuide, exerciseGuideFrames, homeCoachRoutine, homeLegsRoutine, homeGym, homeMoves, isObsoleteHomeRoutine } from "./homeTraining";
 import { reportUrl } from "./bodyDetails";
 import { cardioMix } from "./cardioMix";
-import Stretch from "./Stretch";
-import { chestStretchRoutine, isStretch, stretchMoves, stretchTiming } from "./stretchTraining";
+import Stretch, { type StretchResult } from "./Stretch";
+import { planText } from "./stretchPlan";
+import { chestStretchRoutine, isStretch, stretchMoves } from "./stretchTraining";
 import StrengthTile from "./StrengthTile";
 import SetTable from "./SetTable";
 import { copyText } from "./clipboard";
@@ -1684,7 +1686,7 @@ function Machines() {
           onChange={(e) => setGym(e.target.value)}
         >
           <option value="">ทุกสถานที่</option>
-          {gymsFor(entries).map((item) => <option key={item.id} value={item.id}>{item.name}{item.id === "Jett" ? " · สถิติเก่า" : ""}</option>)}
+          {gymsFor(entries).filter((item) => !item.archived || showArchived).map((item) => <option key={item.id} value={item.id}>{item.name}{item.id === "Jett" ? " · สถิติเก่า" : ""}</option>)}
         </select>
       </div>
       <div className="chips">
@@ -1908,8 +1910,8 @@ function MachineDetail({ id, close, selectMachine }: {
         )}
         <MachineInsights id={id} machine={m} entries={entries} />
         <div>
-          <h4>การตั้งเครื่อง</h4>
-          <p className="preserve">{m.setup || "ยังไม่มีบันทึก"}</p>
+          <h4>{isStretch(id) ? "กี่วินาที กี่ครั้ง" : "การตั้งเครื่อง"}</h4>
+          <p className="preserve">{isStretch(id) ? planText(id) : m.setup || "ยังไม่มีบันทึก"}</p>
         </div>
         <div>
           <h4>วิธีเล่น</h4>
@@ -3867,9 +3869,15 @@ function GymSettings() {
               archived: form.has("archived"),
             };
             void run(async () => {
-              const latest = gymsFor(await allEntries());
+              const current = await allEntries();
+              const removed = (current.find((e) => e.id === gymCatalogId && !e.deleted)?.data.gyms as Gym[] | undefined ?? [])
+                .filter((gym) => gym.removed);
+              const latest = gymsFor(current);
+              // Typing a removed gym's name again brings it back instead of creating a second one.
+              const back = removed.find((gym) => gym.name.trim().toLowerCase() === updated.name.toLowerCase());
               await save("settings", {
-                gyms: [...latest.filter((gym) => gym.id !== updated.id), updated],
+                gyms: [...removed.filter((gym) => gym !== back), ...latest.filter((gym) => gym.id !== updated.id),
+                  back ? { ...updated, id: back.id, archived: false } : updated],
               }, gymCatalogId);
               setEditing(null);
             }, "บันทึกยิมแล้ว");
@@ -3881,6 +3889,12 @@ function GymSettings() {
               เก็บเข้าคลัง
             </label>
             <button className="primary">บันทึกยิม</button>
+            {gyms.some((gym) => gym.id === editing.id) && (gymInUse(entries, editing.id)
+              ? <p className="muted">ยิมนี้มีเครื่องที่ใช้อยู่หรือมีประวัติการฝึก จึงลบไม่ได้ เก็บเข้าคลังแทนได้</p>
+              : <button type="button" className="danger" onClick={() => run(async () => {
+                  await removeGym(editing.id);
+                  setEditing(null);
+                }, "ลบยิมแล้ว เครื่องที่ซ่อนไว้ย้ายไปถังขยะ")}>ลบยิมนี้</button>)}
           </form>
         </Modal>
       )}
@@ -4646,27 +4660,29 @@ function SessionEditorForm({
     ? (entries.find((e) => e.id === x.machineId)?.data as Machine | undefined)
     : undefined;
   const stretchIds = s.exercises.filter(({ machineId }) => isStretch(machineId)).map(({ machineId }) => machineId);
-  const stretchPhoto = (machineId: string) => {
-    const machine = entries.find((entry) => entry.id === machineId && entry.kind === "machine");
-    return machine && <MachineCover entry={machine} entries={entries} />;
-  };
   const timerIds = stretchProgram && stretchIds.length ? stretchIds : x && isStretch(x.machineId) ? [x.machineId] : [];
   const leaveStretch = () => {
     setStretchProgram(null);
     setFocus(null);
   };
-  const saveStretch = (results: Map<string, number>) => {
-    setS((previous) => ({
-      ...previous,
-      exercises: previous.exercises.map((exercise) => {
-        const reps = results.get(exercise.machineId);
-        if (!reps) return exercise;
-        const set: SetLog = { id: uid(), reps, holdSeconds: stretchTiming(exercise.machineId).hold, load: null, warmup: false, done: true };
-        return { ...exercise, sets: [...exercise.sets, set] };
-      }),
-    }));
+  const addStretch = (results: Map<string, StretchResult>) => setS((previous) => ({
+    ...previous,
+    exercises: previous.exercises.map((exercise) => {
+      const result = results.get(exercise.machineId);
+      if (!result) return exercise;
+      const set: SetLog = { id: uid(), reps: result.reps, holdSeconds: result.hold, load: null, warmup: false, done: true };
+      return { ...exercise, sets: [...exercise.sets, set] };
+    }),
+  }));
+  const saveStretch = (results: Map<string, StretchResult>) => {
+    addStretch(results);
     leaveStretch();
   };
+  const removeStretchSet = (machineId: string, setId: string) => setS((previous) => ({
+    ...previous,
+    exercises: previous.exercises.map((exercise) => exercise.machineId === machineId
+      ? { ...exercise, sets: exercise.sets.filter((set) => set.id !== setId) } : exercise),
+  }));
   if (summary) return (
     <Modal title="สรุปการฝึก" close={() => finishing.current ? close() : setSummary(null)}>
       <div className="form" ref={scroller}>
@@ -4696,13 +4712,25 @@ function SessionEditorForm({
         )}
         {timerIds.length ? (
           <>
-            {x && <div className="detail-photo">{stretchPhoto(x.machineId)}</div>}
-            {x?.sets.some((set) => set.done) && (
-              <p className="ok">{x.sets.filter((set) => set.done).map((set) => formatSet(set, x.loadMode)).join(" / ")}</p>
-            )}
+            {s.exercises.filter((exercise) => timerIds.includes(exercise.machineId) && exercise.sets.some((set) => set.done)).map((exercise) => (
+              <div className="stretch-done" key={exercise.machineId}>
+                {timerIds.length > 1 && <strong>{entries.find((e) => e.id === exercise.machineId)?.data.thai}</strong>}
+                {exercise.sets.filter((set) => set.done).map((set) => (
+                  <span key={set.id}>
+                    <span className="ok">{formatSet(set, exercise.loadMode)}</span>
+                    <button type="button" className="icon" aria-label={`ลบ ${formatSet(set, exercise.loadMode)}`}
+                      onClick={() => removeStretchSet(exercise.machineId, set.id)}><X size={15} /></button>
+                  </span>
+                ))}
+              </div>
+            ))}
             {s.status === "draft"
               ? <Stretch key={timerIds.join(",")} ids={timerIds} sessionId={id} onSave={saveStretch} back={leaveStretch}
-                  photo={(machineId) => <div className="detail-photo">{stretchPhoto(machineId)}</div>} />
+                  onLog={(machineId, result) => {
+                    addStretch(new Map([[machineId, result]]));
+                    notify("บันทึกแล้ว กลับไปที่รายการฝึกเพื่อจบการฝึก");
+                  }}
+                  photo={(machineId) => <div className="focus-photo"><MachinePhoto id={machineId} /></div>} />
               : <button className="secondary" onClick={leaveStretch}>กลับไปที่รายการฝึก</button>}
           </>
         ) : x && focus !== null ? (
@@ -4798,7 +4826,7 @@ function SessionEditorForm({
                           </small>
                         ) : (
                           <small>
-                            ครั้งก่อน{" "}
+                            {isStretch(x.machineId) && `${planText(x.machineId)} · `}ครั้งก่อน{" "}
                             {last
                               ? `${shortDate(last.entry.data.date)}: ${last
                                   .exercise!.sets.filter((a) => a.done)

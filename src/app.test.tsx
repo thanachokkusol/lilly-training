@@ -195,6 +195,69 @@ it("starts today's home program with planned sets, guide photos and the cool-dow
   const done = (await session()).data.exercises.flatMap((x: any) => x.sets.filter((set: any) => set.done).map((set: any) => [x.machineId, set.reps, set.holdSeconds]));
   expect(done).toEqual([["home-crunch", 12, undefined], ["home-stretch-hip-flexor", 1, 20]]);
 });
+it("explains a stretch before starting, lets the person set it, press each repetition or log it without a timer", async () => {
+  location.hash = "#machines";
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Wall Chest Stretch \(Elbow\)/ }));
+  expect((await topDialog()).getByText("ค้าง 10 วิ × 3 ครั้งต่อข้าง")).toBeTruthy();
+  fireEvent.click((await topDialog()).getByRole("button", { name: /เริ่มฝึกท่านี้/ }));
+  await screen.findByRole("button", { name: "เริ่มจับเวลาท่านี้" });
+  // Nothing runs until the person chooses.
+  expect((await topDialog()).getByText(/งอศอกประมาณ 90°/)).toBeTruthy();
+  expect(screen.queryByRole("progressbar")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: /เพิ่ม ยืดอก ศอกพิงกำแพง ค้างกี่วินาที/ }));
+  fireEvent.change(screen.getByRole("spinbutton", { name: "ยืดอก ศอกพิงกำแพง กี่ครั้งต่อข้าง" }), { target: { value: "2" } });
+  expect(screen.getByText(/ค้าง 15 วิ × 2 ครั้งต่อข้าง/)).toBeTruthy();
+  fireEvent.change(screen.getByRole("spinbutton", { name: "ยืดอก ศอกพิงกำแพง ทำไปทั้งหมดกี่ครั้ง" }), { target: { value: "3" } });
+  fireEvent.click(screen.getByRole("button", { name: "บันทึกค้าง 15 วิ × 3 ครั้ง" }));
+  expect(await screen.findByText("ค้าง 15 วิ × 3 ครั้ง")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "ลบ ค้าง 15 วิ × 3 ครั้ง" }));
+  expect(screen.queryByText("ค้าง 15 วิ × 3 ครั้ง")).toBeNull();
+  // Step by step: the hold waits for a press and the next one does not start by itself.
+  fireEvent.click(screen.getByRole("button", { name: "กดเองทีละครั้ง" }));
+  expect(screen.getByRole("heading", { name: "พร้อมแล้วกดเริ่ม · 15 วิ" })).toBeTruthy();
+  expect(screen.getByText(/ขวา · ครั้ง 1\/2/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "เริ่มค้าง" }));
+  const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 15_100);
+  try {
+    expect(await screen.findByText(/ขวา · ครั้ง 2\/2/)).toBeTruthy();
+  } finally {
+    clock.mockRestore();
+  }
+  expect(screen.getByRole("heading", { name: "พร้อมแล้วกดเริ่ม · 15 วิ" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "นับว่าทำแล้ว" }));
+  fireEvent.click(screen.getByRole("button", { name: "ข้ามครั้งนี้" }));
+  expect(screen.getByText(/ซ้าย · ครั้ง 2\/2/)).toBeTruthy();
+  expect(screen.getByText(/ทำแล้ว 2 ครั้ง/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "บันทึกผลที่ทำแล้ว" }));
+  fireEvent.click(await screen.findByRole("button", { name: "จบการฝึก" }));
+  await waitFor(async () => {
+    const session = (await allEntries()).find((entry) => entry.kind === "session")!;
+    expect(session.data.status).toBe("completed");
+    expect(session.data.exercises[0].sets.map((set: any) => [set.reps, set.holdSeconds])).toEqual([[2, 15]]);
+  });
+});
+it("removes an unused gym from every list but never one with history", async () => {
+  const machine = { name: "Old Press", thai: "", group: "อก", setup: "", cues: "", loadMode: "total" };
+  await save("machine", { ...machine, gym: "อื่น ๆ", archived: true }, "old-other");
+  await save("machine", { ...machine, name: "WE Press", gym: "WE Fitness" }, "we-press");
+  location.hash = "#settings";
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /^WE Fitness/ }));
+  expect((await topDialog()).queryByRole("button", { name: "ลบยิมนี้" })).toBeNull();
+  fireEvent.click((await topDialog()).getByRole("button", { name: "ปิด" }));
+  fireEvent.click(screen.getByRole("button", { name: /^อื่น ๆ/ }));
+  fireEvent.click((await topDialog()).getByRole("button", { name: "ลบยิมนี้" }));
+  await waitFor(() => expect(screen.queryByRole("button", { name: /^อื่น ๆ/ })).toBeNull());
+  const entries = await allEntries();
+  expect(entries.find((e) => e.id === "old-other")?.deleted).toBe(true);
+  expect(entries.find((e) => e.id === "we-press")?.deleted).toBeFalsy();
+  // Editing another gym keeps it removed.
+  fireEvent.click(screen.getByRole("button", { name: /^Jett/ }));
+  fireEvent.click((await topDialog()).getByRole("button", { name: "บันทึกยิม" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(screen.queryByRole("button", { name: /^อื่น ๆ/ })).toBeNull();
+});
 it("opens the adapted coach plan with the home gym and all six exercises selected", async () => {
   location.hash = "#today";
   render(<App />);

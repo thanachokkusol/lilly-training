@@ -89,11 +89,10 @@ npm audit
 
 - Body outline from [react-native-body-highlighter](https://github.com/HichamELBSI/react-native-body-highlighter), MIT License, Copyright (c) 2022 ELABBASSI Hicham.
 
-- Wall Chest Stretch (Elbow) uses the one-arm illustration from [Open Exercise Illustrations](https://github.com/MarvinNazari/exercise-images), CC0 1.0. Resized and converted to JPEG.
 
 - Kettlebell Swing illustrations by [Marvin Nazari](https://github.com/MarvinNazari/exercise-images), CC0 1.0. Resized and converted to JPEG.
 - Kettlebell Upright Row photo by [Tyler Read / PT Pioneer](https://www.ptpioneer.com/), from [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Upright_row_with_kettle_bell.jpg), [CC BY 2.0](https://creativecommons.org/licenses/by/2.0/). Resized for the app.
 - Forward Lunge illustrations by [RepDB](https://repdb.co), from its free exercise dataset. Converted to JPEG.
-- Doorway Chest Stretch and Wall Chest Stretch (Straight Arm) are original renders made for this app, posed on the Mixamo "X Bot" mannequin.
+- Doorway Chest Stretch and both Wall Chest Stretches are original renders made for this app, posed on the Mixamo "X Bot" mannequin.
 - Stiff-Legged Dumbbell Deadlift and the leg, glute, calf and back stretch photos from [Free Exercise DB](https://github.com/yuhonas/free-exercise-db) (Unlicense).
 - Concentration Curl, Reverse Curl, Lying Dumbbell Triceps Extension, and Crunch photos from [Free Exercise DB](https://github.com/yuhonas/free-exercise-db). Side-Lying Hip Abduction illustrations by [Marvin Nazari](https://github.com/MarvinNazari/exercise-images), CC0 1.0, resized and converted to JPEG.

@@ -3366,3 +3366,107 @@ button.set-previous:disabled {
 .compare-list .lower {
   color: #5f6a58;
 }
+/* Stretch: how, how long, and the person's own choice of timing */
+.stretch-plan {
+  display: grid;
+  gap: 10px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+.stretch-plan h3 {
+  margin: 4px 0 0;
+  font-size: 19px;
+}
+.form .stretch-plan p,
+.form .stretch-phase p {
+  font-size: 15px;
+  line-height: 1.6;
+  color: #3d4a3f;
+}
+.form .stretch-plan .stretch-plan-text {
+  font-weight: 600;
+  color: #284e30;
+}
+.stepper-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.stepper > span {
+  display: block;
+  font-size: 12px;
+  color: #5f6a58;
+  margin-bottom: 4px;
+}
+.stepper > div {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) 36px;
+  border: 1px solid #dedfd5;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+.stepper button {
+  min-height: 44px;
+  font-size: 18px;
+  background: #eef0e6;
+}
+.stepper input {
+  border: 0;
+  border-radius: 0;
+  min-width: 0;
+  padding: 0;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  appearance: textfield;
+}
+.stepper input::-webkit-inner-spin-button {
+  display: none;
+}
+.stretch-log {
+  display: grid;
+  gap: 10px;
+  padding-top: 10px;
+}
+.stretch-log label {
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+}
+.stretch-start {
+  position: sticky;
+  bottom: 0;
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 10px;
+  padding: 12px 0;
+  background: #fafaf5;
+}
+.stretch-done {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  align-items: center;
+}
+.stretch-done > span {
+  display: inline-flex;
+  align-items: center;
+}
+@media (max-width: 420px) {
+  .stepper-row {
+    grid-template-columns: 1fr;
+  }
+  .stepper {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 150px;
+    align-items: center;
+    gap: 10px;
+  }
+  .stepper > span {
+    font-size: 14px;
+    margin: 0;
+  }
+}
+.stretch-phase h3 {
+  color: #26372e;
+}

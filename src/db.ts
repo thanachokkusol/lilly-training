@@ -4,6 +4,7 @@ import { validateEntry } from "./validation";
 import { exerciseKey, octoberWalkWeek, today } from "./core";
 import { planSessionMove, type MachineMove } from "./migration";
 import { exerciseGuideFrames, homeCoachRoutine, homeLegsRoutine, homeGym, homeMoves, isObsoleteHomeRoutine } from "./homeTraining";
+import { gymCatalogId, gymInUse, gymsFor, type Gym } from "./gyms";
 import { chestStretchRoutine, stretchMoves } from "./stretchTraining";
 const loadZip = () => import("jszip").then((m) => m.default);
 export const sandbox =
@@ -115,6 +116,28 @@ export async function addMissingHomeTraining(obsoleteId?: string) {
     ...obsolete, data: { ...obsolete.data, retiredBy: homeCoachRoutine.id }, updatedAt, dirty: true, deleted: true,
   }));
   await Promise.all([...changes, tx.done]);
+}
+/** Remove an unused gym from the list; its put-away machines go to the trash, where they can be restored. */
+export async function removeGym(id: string) {
+  assertWritable();
+  const tx = (await db).transaction("entries", "readwrite");
+  const entries = await tx.store.getAll() as Entry[];
+  const gym = gymsFor(entries).find((item) => item.id === id);
+  if (!gym || gymInUse(entries, id)) {
+    await tx.done;
+    throw Error("ยิมนี้ยังมีเครื่องที่ใช้อยู่หรือมีประวัติการฝึก ลบไม่ได้");
+  }
+  const updatedAt = new Date().toISOString();
+  const saved = entries.find((e) => e.id === gymCatalogId);
+  const all = [...(saved && !saved.deleted ? saved.data.gyms as Gym[] : gymsFor(entries))];
+  const catalog = { id: gymCatalogId, kind: "settings" as const, version: 0, ...saved, updatedAt, dirty: true, deleted: false,
+    data: { gyms: [...all.filter((item) => item.id !== id), { ...gym, archived: true, removed: true }] } };
+  validateEntry(catalog);
+  await tx.store.put(catalog);
+  for (const machine of entries)
+    if (machine.kind === "machine" && machine.data.gym === id && !machine.deleted)
+      await tx.store.put({ ...machine, updatedAt, dirty: true, deleted: true });
+  await tx.done;
 }
 export async function moveMachinePhoto(photoId: string, from: string, to: string) {
   assertWritable();
