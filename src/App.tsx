@@ -464,6 +464,8 @@ export default function App() {
     undefined,
   );
   const syncing = useRef(false);
+  const latestUser = useRef(authUser);
+  latestUser.current = authUser;
   const viewRequest = useRef(0);
   const refresh = async () => {
     setEntries(await allEntries());
@@ -487,10 +489,13 @@ export default function App() {
     if (syncing.current) return;
     syncing.current = true;
     setBusy(true);
+    const startedAs = latestUser.current;
+    let retry = false;
     try {
-      const r = await sync(async () => {
+      // Sign-in starts a sync before the account is verified, so mark the account that was actually synced.
+      const r = await sync(async (userId) => {
         await refresh();
-        setInitialSync(authUser);
+        setInitialSync(userId);
       });
       await refresh();
       if (!silent && (r.pushed || r.conflicts || r.missingPhotos))
@@ -499,10 +504,12 @@ export default function App() {
         );
     } catch (e) {
       if (!silent) notify(e instanceof Error ? e.message : String(e));
+      retry = latestUser.current !== startedAs;
+      if (!retry) setInitialSync(startedAs);
     } finally {
-      setInitialSync(authUser);
       syncing.current = false;
       setBusy(false);
+      if (retry) void synchronize(true);
     }
   };
   useEffect(() => {
@@ -539,7 +546,8 @@ export default function App() {
         );
         return;
       }
-      setAuthUser(null);
+      // Token refreshes repeat for the same account; keep the open page while it is checked again.
+      setAuthUser((user) => user === session.user.id ? user : null);
       setTimeout(async () => {
         if (!live || n !== generation) return;
         const cached =

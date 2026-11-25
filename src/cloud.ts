@@ -75,7 +75,7 @@ export function configure(c: CloudConfig) {
   client = null;
 }
 let syncing = false;
-export async function sync(onRecordsReady?: () => Promise<void>) {
+export async function sync(onRecordsReady?: (userId: string) => Promise<void>) {
   if (syncing) return { pushed: 0, pulled: 0, conflicts: 0, missingPhotos: 0 };
   const c = await cloud();
   if (!c) throw Error("ยังไม่ได้เชื่อม Supabase");
@@ -204,7 +204,7 @@ export async function sync(onRecordsReady?: () => Promise<void>) {
       if ((data?.length ?? 0) < 500) break;
       lastId = data!.at(-1)!.id;
     }
-    await onRecordsReady?.();
+    await onRecordsReady?.(user.id);
     let missingPhotos = 0;
     let nextPhoto = 0;
     const fetchPhotos = async () => {
