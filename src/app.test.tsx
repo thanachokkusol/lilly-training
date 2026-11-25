@@ -479,6 +479,35 @@ it("logs every exercise on one screen with last time beside each set, rests by i
   expect(stored.exercises.map((x: any) => x.superset)).toEqual([1, 1]);
   expect(stored.exercises[1].sets[0].done).toBe(false);
 });
+it("copies the workout summary without clipboard permission, and shows the text when the browser blocks every way", async () => {
+  await save("machine", { name: "Leg Press", thai: "", gym: "WE Fitness", group: "ขา", setup: "", cues: "", loadMode: "total" }, "leg");
+  await save("session", { date: "2026-01-10", title: "Copy Me", status: "completed", note: "", exercises: [
+    { machineId: "leg", loadMode: "total", setup: "", note: "", sets: [{ id: "a", load: 80, reps: 12, warmup: false, done: true }] }] }, "copy-me");
+  const clipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
+    writeText: async () => { throw new DOMException("Write permission denied.", "NotAllowedError"); } } });
+  let copied = "";
+  const exec = vi.fn(() => { copied = (document.activeElement as HTMLTextAreaElement).value; return true; });
+  document.execCommand = exec as any;
+  try {
+    location.hash = "#history";
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: /Copy Me/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "คัดลอกสรุปเวท" }));
+    expect(await screen.findByText("คัดลอกสรุปเวทแล้ว")).toBeTruthy();
+    expect(copied).toContain("Leg Press: 80 กก. × 12 ครั้ง");
+    expect(document.querySelectorAll("textarea[readonly]")).toHaveLength(0);
+    exec.mockReturnValue(false);
+    fireEvent.click(screen.getByRole("button", { name: "คัดลอกสรุปเวท" }));
+    const box = await screen.findByLabelText("ข้อความที่จะคัดลอก") as HTMLTextAreaElement;
+    expect(box.value).toContain("Leg Press: 80 กก. × 12 ครั้ง");
+    expect(box.selectionEnd).toBe(box.value.length);
+  } finally {
+    Reflect.deleteProperty(document, "execCommand");
+    if (clipboard) Object.defineProperty(navigator, "clipboard", clipboard);
+    else Reflect.deleteProperty(navigator, "clipboard");
+  }
+});
 it("edits sets, repetitions, rest and folder of a program", async () => {
   await save("machine", { name: "Leg Press", thai: "", gym: "WE Fitness", group: "ขา", setup: "", cues: "", loadMode: "total" }, "leg");
   await save("routine", { title: "Legs", machineIds: ["leg"], days: [], targets: { leg: { sets: 3, reps: 12, note: "ช้า" } } }, "legs");
@@ -500,7 +529,7 @@ it("shows a client's workout without any control that could change it", async ()
   const close = vi.fn();
   render(
     <Data.Provider value={{
-      readOnly: true, refresh: async () => {}, run: async (fn) => { await fn(); }, notify: () => {},
+      readOnly: true, refresh: async () => {}, run: async (fn) => { await fn(); }, notify: () => {}, copy: async () => {},
       entries: [
         { ...metadata, id: "m", kind: "machine", data: { name: "Seated Cable Row", thai: "", gym: "M Fitness", group: "หลัง", setup: "", cues: "", loadMode: "total" } },
         { ...metadata, id: "s", kind: "session", data: { date: "2026-11-24", title: "Upper Body", status: "completed", note: "โน้ตลูกเทรน", exercises: [

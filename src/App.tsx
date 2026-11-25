@@ -141,6 +141,7 @@ import Stretch from "./Stretch";
 import { chestStretchRoutine, isStretch, stretchMoves, stretchTiming } from "./stretchTraining";
 import StrengthTile from "./StrengthTile";
 import SetTable from "./SetTable";
+import { copyText } from "./clipboard";
 import WorkoutSummary, { MachineInsights, WorkoutNumbers } from "./WorkoutSummary";
 import { muscleIds, muscleLabels, musclesFor, muscleText } from "./muscles";
 import { kg, recordLabels, sessionSets, sessionVolume, setRecords, setsBefore, previousExercise, warmupSets } from "./workoutStats";
@@ -149,6 +150,7 @@ type Context = {
   refresh: () => Promise<void>;
   run: (fn: () => Promise<unknown>, msg?: string) => Promise<void>;
   notify: (m: string) => void;
+  copy: (text: string, done: string) => Promise<void>;
   readOnly: boolean;
 };
 export const Data = createContext<Context>(null!);
@@ -480,6 +482,7 @@ export default function App() {
     [busy, setBusy] = useState(false),
     [initialSync, setInitialSync] = useState<string | null>(null),
     [login, setLogin] = useState(false),
+    [manualCopy, setManualCopy] = useState<string | null>(null),
     [profile, setProfile] = useState<Profile | null>(null),
     [clients, setClients] = useState<Client[]>([]),
     [viewing, setViewing] = useState<Client | null>(null),
@@ -511,6 +514,10 @@ export default function App() {
     } catch (e) {
       notify(e instanceof Error ? e.message : String(e));
     }
+  };
+  const copy = async (text: string, done: string) => {
+    if (await copyText(text)) notify(done);
+    else setManualCopy(text);
   };
   const synchronize = async (silent = false) => {
     if (syncing.current) return;
@@ -723,6 +730,7 @@ export default function App() {
         refresh,
         run,
         notify,
+        copy,
         readOnly: !!viewing,
       }}
     >
@@ -880,6 +888,15 @@ export default function App() {
               <X size={16} />
             </button>
           </div>
+        )}
+        {manualCopy !== null && (
+          <Modal title="คัดลอกข้อความ" close={() => setManualCopy(null)}>
+            <div className="form">
+              <p>เบราว์เซอร์นี้ไม่ให้แอปคัดลอกเอง แตะค้างในกล่อง (คอมกด Ctrl+C) เพื่อคัดลอก</p>
+              <textarea className="manual-copy" readOnly aria-label="ข้อความที่จะคัดลอก" rows={12} value={manualCopy}
+                ref={(area) => { area?.focus(); area?.select(); }} onFocus={(e) => e.currentTarget.select()} />
+            </div>
+          </Modal>
         )}
         {login && (
           <Login
@@ -2827,10 +2844,7 @@ function CardioPage({ openReport = false }: { openReport?: boolean }) {
             <button
               className="primary wide"
               onClick={() =>
-                run(
-                  () => navigator.clipboard.writeText(message),
-                  "คัดลอกแล้ว พร้อมส่งให้โค้ช",
-                )
+                copy(message, "คัดลอกแล้ว พร้อมส่งให้โค้ช")
               }
             >
               <Copy size={17} />
@@ -4318,7 +4332,7 @@ function SettingsPage({
   );
 }
 function SessionView({ source, close }: { source: Entry; close: () => void }) {
-  const { entries, run } = useData();
+  const { entries, copy } = useData();
   const session = source.data as Session;
   const venues = sessionGyms(entries, session).map((gym) => gymName(entries, gym));
   const [summary, setSummary] = useState(false);
@@ -4368,7 +4382,7 @@ function SessionView({ source, close }: { source: Entry; close: () => void }) {
         )}
         {session.note && <p className="preserve">{session.note}</p>}
         <button className="secondary" onClick={() =>
-          run(() => navigator.clipboard.writeText(workoutMessage(session, entries)), "คัดลอกสรุปเวทแล้ว")}>
+          copy(workoutMessage(session, entries), "คัดลอกสรุปเวทแล้ว")}>
           <Copy size={16} />
           คัดลอกสรุปเวท
         </button>
@@ -4424,7 +4438,7 @@ function SessionEditorForm({
   focusMachine?: string;
 }) {
   const id = source.id;
-  const { entries, run, notify } = useData(),
+  const { entries, run, notify, copy } = useData(),
     [s, setS] = useState<Session>(() => structuredClone(source.data)),
     [stretchProgram, setStretchProgram] = useRememberedView(`stretch-program:${id}`),
     [saving, setSaving] = useState(false),
@@ -4658,7 +4672,7 @@ function SessionEditorForm({
       <div className="form" ref={scroller}>
         <WorkoutSummary entry={summary} entries={entries} />
         <div className="sticky-actions">
-          <button className="secondary" onClick={() => run(() => navigator.clipboard.writeText(workoutMessage(summary.data, entries)), "คัดลอกสรุปเวทแล้ว")}>
+          <button className="secondary" onClick={() => copy(workoutMessage(summary.data, entries), "คัดลอกสรุปเวทแล้ว")}>
             <Copy size={16} /> คัดลอกสรุปเวท
           </button>
           <button className="primary" onClick={() => finishing.current ? close() : setSummary(null)}>เสร็จ</button>
@@ -4871,11 +4885,7 @@ function SessionEditorForm({
               <button
                 className="secondary"
                 onClick={() =>
-                  run(
-                    () =>
-                      navigator.clipboard.writeText(workoutMessage(s, entries)),
-                    "คัดลอกสรุปเวทแล้ว",
-                  )
+                  copy(workoutMessage(s, entries), "คัดลอกสรุปเวทแล้ว")
                 }
               >
                 <Copy size={16} />
