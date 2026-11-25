@@ -25,6 +25,9 @@ export function TrainerAccounts({ viewJournal }: { viewJournal: (client: { id: s
   const { run, notify } = useData();
   const [trainers, setTrainers] = useState<Trainer[] | null>(null);
   const [supportsFriends, setSupportsFriends] = useState(false);
+  const [supportsRemoval, setSupportsRemoval] = useState(false);
+  const [removeFor, setRemoveFor] = useState<Trainer | null>(null);
+  const [removing, setRemoving] = useState(false);
   const [creating, setCreating] = useState(false);
   const [resetFor, setResetFor] = useState<Trainer | null>(null);
   const load = () =>
@@ -32,6 +35,7 @@ export function TrainerAccounts({ viewJournal }: { viewJournal: (client: { id: s
       .then((d) => {
         setTrainers(d.trainers);
         setSupportsFriends(d.supportsFriends === true);
+        setSupportsRemoval(d.supportsRemoval === true);
       })
       .catch((e) => {
         setTrainers([]);
@@ -78,8 +82,27 @@ export function TrainerAccounts({ viewJournal }: { viewJournal: (client: { id: s
           >
             {t.disabled ? "เปิดบัญชี" : "ปิดบัญชี"}
           </button>
+          {supportsRemoval && <button className="text-button danger-text" onClick={() => setRemoveFor(t)}>ลบบัญชี</button>}
         </div>
       ))}
+      {removeFor && <Modal title="ลบบัญชีออกจากรายการ" close={() => { if (!removing) setRemoveFor(null); }}>
+        <div className="form">
+          <p><strong>{removeFor.displayName || removeFor.username}</strong> จะเข้าระบบไม่ได้และจะหายจากรายการบัญชี ประวัติการฝึกจะยังเก็บไว้</p>
+          <button className="danger" disabled={removing} onClick={() => {
+            setRemoving(true);
+            void run(async () => {
+              try {
+                await trainerAdmin({ action: "remove", id: removeFor.id });
+                setTrainers((accounts) => accounts?.filter((account) => account.id !== removeFor.id) ?? null);
+                setRemoveFor(null);
+              } finally {
+                setRemoving(false);
+              }
+            }, "ลบบัญชีออกจากรายการแล้ว");
+          }}>ยืนยันลบบัญชี</button>
+          <button className="secondary" disabled={removing} onClick={() => setRemoveFor(null)}>ยกเลิก</button>
+        </div>
+      </Modal>}
       {creating && (
         <Modal title="สร้างบัญชี" close={() => setCreating(false)}>
           <form

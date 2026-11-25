@@ -51,7 +51,9 @@ Deno.serve(async (req) => {
   const linkedTrainer = async (id: unknown) => {
     if (typeof id !== "string") return null;
     const { data } = await admin.from("profiles").select("id").eq("id", id).in("role", ["trainer", "friend"]).maybeSingle();
-    return data ? id : null;
+    if (!data) return null;
+    const { data: auth, error } = await admin.auth.admin.getUserById(id);
+    return !error && auth.user && !auth.user.app_metadata?.lilly_removed ? id : null;
   };
 
   switch (body?.action) {
@@ -61,6 +63,7 @@ Deno.serve(async (req) => {
       const out = [];
       for (const profile of profiles ?? []) {
         const { data: user } = await admin.auth.admin.getUserById(profile.id);
+        if (user?.user?.app_metadata?.lilly_removed) continue;
         out.push({
           id: profile.id,
           role: profile.role,
@@ -70,7 +73,7 @@ Deno.serve(async (req) => {
           lastSignInAt: user?.user?.last_sign_in_at ?? null,
         });
       }
-      return json({ trainers: out, supportsFriends: true });
+      return json({ trainers: out, supportsFriends: true, supportsRemoval: true });
     }
     case "create": {
       const username = String(body.username ?? "").trim().toLowerCase();
@@ -116,6 +119,18 @@ Deno.serve(async (req) => {
       const link = await admin.from("coach_links").update({ status: disabled ? "revoked" : "active" }).eq("trainer_id", id);
       if (profile.error || link.error) return fail("เปลี่ยนสถานะบัญชีไม่สำเร็จ", 500);
       return json({ ok: true });
+    }
+    case "remove": {
+      const id = await linkedTrainer(body.id);
+      if (!id) return fail("ไม่พบบัญชีสมาชิก", 404);
+      const profile = await admin.from("profiles").update({ disabled: true }).eq("id", id);
+      if (profile.error) return fail("ปิดสิทธิ์บัญชีไม่สำเร็จ", 500);
+      const links = await admin.from("coach_links").update({ status: "revoked" }).eq("trainer_id", id);
+      if (links.error) return fail("ถอนสิทธิ์โค้ชไม่สำเร็จ", 500);
+      const { error } = await admin.auth.admin.updateUserById(id, {
+        ban_duration: "876000h", app_metadata: { lilly_removed: true },
+      });
+      return error ? fail("เอาบัญชีออกจากรายการไม่สำเร็จ", 500) : json({ ok: true });
     }
     default:
       return fail("ไม่รู้จักคำสั่ง");
