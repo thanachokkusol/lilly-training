@@ -12,6 +12,8 @@
   --white: #fff;
   --radius: 20px;
 }
+.password-input { display: flex; gap: 4px; align-items: center; }
+.password-input input { flex: 1; }
 * {
   box-sizing: border-box;
 }

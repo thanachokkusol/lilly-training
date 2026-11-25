@@ -243,7 +243,7 @@ export const loginEmail = (identifier: string) => {
   const id = identifier.trim().toLowerCase();
   return id.includes("@") ? id : `${id}@lilly.local`;
 };
-export type Profile = { id: string; role: "owner" | "trainer"; displayName: string; username: string };
+export type Profile = { id: string; role: "owner" | "trainer" | "friend"; displayName: string; username: string };
 let signedInProfile: Profile | null = null;
 /** Profile loaded at sign-in; used to label programs a trainer assigns. */
 export const currentProfile = () => signedInProfile;
@@ -254,7 +254,7 @@ export async function myProfile(): Promise<Profile | null> {
   const { data: auth } = await c.auth.getUser();
   if (!auth.user) return null;
   const { data: role } = await c.rpc("journal_role");
-  if (role !== "owner" && role !== "trainer") return null;
+  if (role !== "owner" && role !== "trainer" && role !== "friend") return null;
   const { data } = await c.from("profiles").select("display_name,username").eq("id", auth.user.id).maybeSingle();
   return (signedInProfile = {
     id: auth.user.id,
@@ -265,11 +265,16 @@ export async function myProfile(): Promise<Profile | null> {
 }
 export type Client = { id: string; name: string };
 /** People whose journal the signed-in trainer may view. */
-export async function myClients(): Promise<Client[]> {
+export async function myClients(role: "owner" | "trainer"): Promise<Client[]> {
   const c = await cloud();
   if (!c) return [];
   const { data: auth } = await c.auth.getUser();
   if (!auth.user) return [];
+  if (role === "owner") {
+    const { data, error } = await c.from("profiles").select("id,display_name,username").in("role", ["trainer", "friend"]);
+    if (error) throw error;
+    return (data ?? []).map((p) => ({ id: p.id, name: p.display_name || p.username || "สมาชิก" }));
+  }
   const { data: links } = await c.from("coach_links").select("client_id").eq("trainer_id", auth.user.id).eq("status", "active");
   const ids = (links ?? []).map((l) => l.client_id as string);
   if (!ids.length) return [];
@@ -301,15 +306,12 @@ export async function fetchUserRecords(userId: string): Promise<Entry[]> {
   return out;
 }
 /** Photo of a record not stored on this device (e.g. a client's evidence). */
-const remotePhotos = new Map<string, Promise<Blob | undefined>>();
 export function remotePhoto(path: string) {
-  if (!remotePhotos.has(path))
-    remotePhotos.set(path, cloud().then(async (c) => {
-      if (!c) return undefined;
-      const { data } = await c.storage.from("training-photos").download(path);
-      return data ?? undefined;
-    }).catch(() => undefined));
-  return remotePhotos.get(path)!;
+  return cloud().then(async (c) => {
+    if (!c) return undefined;
+    const { data } = await c.storage.from("training-photos").download(path);
+    return data ?? undefined;
+  }).catch(() => undefined);
 }
 export async function trainerAdmin(body: Record<string, unknown>) {
   const c = await cloud();

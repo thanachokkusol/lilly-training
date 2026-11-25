@@ -12,10 +12,12 @@ create table if not exists public.profiles (
  id uuid primary key references auth.users(id) on delete cascade,
  username text unique check (username ~ '^[a-z0-9._-]{3,32}$'),
  display_name text not null default '' check (length(display_name) <= 80),
- role text not null check (role in ('owner','trainer')),
+ role text not null check (role in ('owner','trainer','friend')),
  disabled boolean not null default false,
  created_at timestamptz not null default now()
 );
+alter table public.profiles drop constraint if exists profiles_role_check;
+alter table public.profiles add constraint profiles_role_check check (role in ('owner','trainer','friend'));
 alter table public.profiles enable row level security;
 revoke all on public.profiles from anon, authenticated;
 
@@ -29,12 +31,17 @@ create table if not exists public.coach_links (
 );
 alter table public.coach_links enable row level security;
 revoke all on public.coach_links from anon, authenticated;
+do $$ begin
+ if exists (select 1 from pg_roles where rolname = 'service_role') then
+  grant select, insert, update on public.profiles, public.coach_links to service_role;
+ end if;
+end $$;
 
 -- 'owner' | 'trainer' | null for the signed-in user.
 create or replace function public.journal_role() returns text language sql stable security definer set search_path = '' as $$
  select case
   when exists(select 1 from public.training_owners where user_id = auth.uid()) then 'owner'
-  when exists(select 1 from public.profiles p where p.id = auth.uid() and p.role = 'trainer' and not p.disabled) then 'trainer'
+  else (select p.role from public.profiles p where p.id = auth.uid() and p.role in ('trainer','friend') and not p.disabled)
  end; $$;
 revoke all on function public.journal_role() from public, anon;
 grant execute on function public.journal_role() to authenticated;
@@ -46,15 +53,16 @@ revoke all on function public.is_training_owner() from public, anon;
 grant execute on function public.is_training_owner() to authenticated;
 
 create or replace function public.can_view_user(target uuid) returns boolean language sql stable security definer set search_path = '' as $$
- select target = auth.uid() or exists(
+ select target = auth.uid() or public.journal_role() = 'owner' or (public.journal_role() = 'trainer' and exists(
   select 1 from public.coach_links l join public.profiles p on p.id = l.trainer_id
-  where l.trainer_id = auth.uid() and l.client_id = target and l.status = 'active' and l.can_view and not p.disabled); $$;
+  where l.trainer_id = auth.uid() and l.client_id = target and l.status = 'active' and l.can_view and not p.disabled)); $$;
 revoke all on function public.can_view_user(uuid) from public, anon;
 grant execute on function public.can_view_user(uuid) to authenticated;
 
 grant select on public.profiles to authenticated;
 drop policy if exists members_read_profiles on public.profiles;
-create policy members_read_profiles on public.profiles for select to authenticated using (public.is_training_owner());
+create policy members_read_profiles on public.profiles for select to authenticated
+ using (public.is_training_owner() and public.can_view_user(id));
 grant select on public.coach_links to authenticated;
 drop policy if exists own_links on public.coach_links;
 create policy own_links on public.coach_links for select to authenticated using (trainer_id = auth.uid() or client_id = auth.uid());
@@ -103,12 +111,23 @@ begin
   select * into current_row from public.training_records r where r.user_id=auth.uid() and r.id=record_id for update;
  end if;
  if found then
+  if current_row.kind <> record_kind or (current_row.shared <> want_shared and
+    (current_row.user_id <> auth.uid() or current_row.shared or record_kind <> 'photo')) then
+    raise exception 'Cannot change record scope or kind';
+  end if;
   if current_row.version<>expected_version then return query select false,current_row.payload,current_row.version,current_row.deleted; return; end if;
+  if record_kind='photo' and record_payload->>'_photoPath' is distinct from current_row.payload->>'_photoPath'
+    and coalesce(split_part(record_payload->>'_photoPath','/',1),auth.uid()::text) <> auth.uid()::text then
+   raise exception 'Invalid photo path';
+  end if;
   update public.training_records r set payload=record_payload,kind=record_kind,version=r.version+1,deleted=is_deleted,
     shared = r.shared or want_shared, updated_by=auth.uid(), updated_at=now()
    where r.user_id=current_row.user_id and r.id=record_id returning * into current_row;
  else
   if expected_version<>0 then raise exception 'Missing remote record'; end if;
+  if record_kind='photo' and coalesce(split_part(record_payload->>'_photoPath','/',1),auth.uid()::text) <> auth.uid()::text then
+   raise exception 'Invalid photo path';
+  end if;
   insert into public.training_records(user_id,id,kind,payload,deleted,shared,updated_by)
    values(auth.uid(),record_id,record_kind,record_payload,is_deleted,want_shared,auth.uid()) returning * into current_row;
  end if;
@@ -121,7 +140,16 @@ grant execute on function public.save_training_record(text,text,jsonb,bigint,boo
 -- Uploads go only into the uploader's own folder. Nobody can delete through the API.
 insert into storage.buckets(id,name,public,file_size_limit,allowed_mime_types) values ('training-photos','training-photos',false,10485760,array['image/jpeg','image/png','image/webp']) on conflict(id) do nothing;
 drop policy if exists training_photo_read on storage.objects;
-create policy training_photo_read on storage.objects for select to authenticated using(bucket_id='training-photos' and public.is_training_owner());
+create policy training_photo_read on storage.objects for select to authenticated using (
+ bucket_id='training-photos' and public.is_training_owner() and (
+  (storage.foldername(name))[1]=auth.uid()::text or public.journal_role()='owner' or exists (
+   select 1 from public.training_records r
+    where r.kind='photo' and not r.deleted
+      and (r.payload->>'_photoPath'=storage.objects.name
+        or (r.payload->>'_photoPath' is null and r.user_id::text||'/'||r.id||'.jpg'=storage.objects.name))
+      and (r.shared or public.can_view_user(r.user_id))
+  )
+ ));
 drop policy if exists training_photo_insert on storage.objects;
 create policy training_photo_insert on storage.objects for insert to authenticated with check(bucket_id='training-photos' and (storage.foldername(name))[1]=auth.uid()::text and public.is_training_owner());
 drop policy if exists training_photo_update on storage.objects;

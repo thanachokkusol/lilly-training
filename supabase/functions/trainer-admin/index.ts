@@ -31,8 +31,15 @@ Deno.serve(async (req) => {
   if (!token) return fail("ต้องเข้าสู่ระบบ", 401);
   const { data: caller, error: callerError } = await admin.auth.getUser(token);
   if (callerError || !caller.user) return fail("ต้องเข้าสู่ระบบ", 401);
-  const { data: owner } = await admin.from("training_owners").select("user_id").eq("user_id", caller.user.id).maybeSingle();
-  if (!owner) return fail("เฉพาะเจ้าของสมุดเท่านั้น", 403);
+  const publicKey = Deno.env.get("SUPABASE_ANON_KEY") || req.headers.get("apikey");
+  if (!publicKey) return fail("ฟังก์ชันยังไม่มีคีย์สำหรับตรวจสิทธิ์", 500);
+  const identity = createClient(url, publicKey, {
+    global: { headers: { Authorization: `Bearer ${token}` } },
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  const { data: role, error: roleError } = await identity.rpc("journal_role");
+  if (roleError) return fail("ตรวจสิทธิ์บัญชีไม่สำเร็จ", 500);
+  if (role !== "owner") return fail("เฉพาะเจ้าของสมุดเท่านั้น", 403);
   const ownerId = caller.user.id;
 
   let body: any;
@@ -43,33 +50,33 @@ Deno.serve(async (req) => {
   }
   const linkedTrainer = async (id: unknown) => {
     if (typeof id !== "string") return null;
-    const { data } = await admin.from("coach_links").select("trainer_id").eq("trainer_id", id).eq("client_id", ownerId).maybeSingle();
+    const { data } = await admin.from("profiles").select("id").eq("id", id).in("role", ["trainer", "friend"]).maybeSingle();
     return data ? id : null;
   };
 
   switch (body?.action) {
     case "list": {
-      const { data: links, error } = await admin.from("coach_links").select("trainer_id,status").eq("client_id", ownerId);
+      const { data: profiles, error } = await admin.from("profiles").select("id,username,display_name,role,disabled").in("role", ["trainer","friend"]);
       if (error) return fail(error.message, 500);
       const out = [];
-      for (const link of links ?? []) {
-        const [{ data: profile }, { data: user }] = await Promise.all([
-          admin.from("profiles").select("username,display_name,disabled").eq("id", link.trainer_id).maybeSingle(),
-          admin.auth.admin.getUserById(link.trainer_id),
-        ]);
+      for (const profile of profiles ?? []) {
+        const { data: user } = await admin.auth.admin.getUserById(profile.id);
         out.push({
-          id: link.trainer_id,
+          id: profile.id,
+          role: profile.role,
           username: profile?.username ?? "",
           displayName: profile?.display_name ?? "",
-          disabled: !!profile?.disabled || link.status !== "active",
+          disabled: !!profile.disabled,
           lastSignInAt: user?.user?.last_sign_in_at ?? null,
         });
       }
-      return json({ trainers: out });
+      return json({ trainers: out, supportsFriends: true });
     }
     case "create": {
       const username = String(body.username ?? "").trim().toLowerCase();
       const displayName = String(body.displayName ?? "").trim().slice(0, 80);
+      const accountRole = body.role ?? "trainer";
+      if (accountRole !== "trainer" && accountRole !== "friend") return fail("ประเภทบัญชีไม่ถูกต้อง");
       if (!USERNAME.test(username)) return fail("ชื่อผู้ใช้ใช้ได้เฉพาะ a-z 0-9 . _ - ยาว 3–32 ตัว");
       if (!validPassword(body.password)) return fail("รหัสผ่านต้องยาว 8–72 ตัวอักษร");
       const { data: taken } = await admin.from("profiles").select("id").eq("username", username).maybeSingle();
@@ -82,11 +89,13 @@ Deno.serve(async (req) => {
       });
       if (error || !created.user) return fail(error?.message ?? "สร้างบัญชีไม่สำเร็จ", 500);
       const id = created.user.id;
-      const p = await admin.from("profiles").insert({ id, username, display_name: displayName || username, role: "trainer" });
-      const l = await admin.from("coach_links").insert({ trainer_id: id, client_id: ownerId, status: "active", can_view: true });
-      if (p.error || l.error) {
+      const p = await admin.from("profiles").insert({ id, username, display_name: displayName || username, role: accountRole });
+      const l = !p.error && accountRole === "trainer"
+        ? await admin.from("coach_links").insert({ trainer_id: id, client_id: ownerId, status: "active", can_view: true })
+        : undefined;
+      if (p.error || l?.error) {
         await admin.auth.admin.deleteUser(id);
-        return fail((p.error ?? l.error)!.message, 500);
+        return fail("บันทึกบัญชีไม่สำเร็จ", 500);
       }
       return json({ id, username });
     }
@@ -103,8 +112,9 @@ Deno.serve(async (req) => {
       const disabled = body.disabled === true;
       const { error } = await admin.auth.admin.updateUserById(id, { ban_duration: disabled ? "876000h" : "none" });
       if (error) return fail(error.message, 500);
-      await admin.from("profiles").update({ disabled }).eq("id", id);
-      await admin.from("coach_links").update({ status: disabled ? "revoked" : "active" }).eq("trainer_id", id).eq("client_id", ownerId);
+      const profile = await admin.from("profiles").update({ disabled }).eq("id", id);
+      const link = await admin.from("coach_links").update({ status: disabled ? "revoked" : "active" }).eq("trainer_id", id);
+      if (profile.error || link.error) return fail("เปลี่ยนสถานะบัญชีไม่สำเร็จ", 500);
       return json({ ok: true });
     }
     default:

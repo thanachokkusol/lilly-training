@@ -151,6 +151,21 @@ describe.sequential("database access controls and optimistic writes", () => {
     expect(rows.rows.filter((r) => r.id === "we-chest")).toEqual([{ id: "we-chest", shared: true }]);
     expect(rows.rows.find((r) => r.id === "test")?.shared).toBe(false);
   });
+  it("isolates friends' journals and evidence while keeping the equipment catalog shared", async () => {
+    await db.exec(`reset role;
+      insert into public.profiles(id,username,role) values ('${other}','friend-test','friend');
+      update public.profiles set disabled=false where id='${trainer}';`);
+    await identity(other);
+    expect((await db.query("select id from public.training_records where not shared")).rows).toHaveLength(0);
+    expect((await db.query("select id from storage.objects")).rows).toHaveLength(0);
+    await db.query(`select * from public.save_training_record('friend-cardio','cardio','{"seconds":30}',0,false)`);
+    await db.query(`select * from public.save_training_record('friend-equipment','machine','{"name":"Row"}',0,false)`);
+    await identity(trainer);
+    expect((await db.query("select id from public.training_records where id='friend-cardio'")).rows).toHaveLength(0);
+    expect((await db.query("select id from public.training_records where id='friend-equipment'")).rows).toHaveLength(1);
+    await identity(owner);
+    expect((await db.query("select id from public.training_records where id='friend-cardio'")).rows).toHaveLength(1);
+  });
   it("unauthenticated clients have no table access or save function access", async () => {
     await db.exec(`reset role;set app.uid='';set role anon;`);
     await expect(

@@ -49,6 +49,25 @@ export async function alignOctoberWalkWeeks(ids: string[]) {
   }
   await tx.done;
 }
+export async function removeEmptyNovemberPulldown() {
+  const tx = (await db).transaction("entries", "readwrite");
+  const entries = await tx.store.getAll() as Entry[];
+  const candidates = entries.filter((entry) => entry.kind === "session" && !entry.deleted && !entry.conflict &&
+    entry.data.date === "2026-11-24" && /^Upper Body(?:\s+24\s*พ\.?ย\.?(?:\s*2026)?)?$/i.test(entry.data.title));
+  if (candidates.length === 1) {
+    const entry = candidates[0];
+    const session: Session = entry.data;
+    const exercise = session.exercises.find((item) => !item.note?.trim() &&
+      item.sets.every((set) => !set.done && set.load == null && set.reps == null && !set.loadText?.trim()) &&
+      entries.some((machine) => machine.id === item.machineId && machine.kind === "machine" &&
+        machine.data.name === "Wide-Grip Lat Pulldown"));
+    if (exercise) await tx.store.put({
+      ...entry, dirty: true, updatedAt: new Date().toISOString(),
+      data: { ...session, exercises: session.exercises.filter((item) => item !== exercise) },
+    });
+  }
+  await tx.done;
+}
 export async function addBundledMachinePhotos(machineId: string, name: string, guide: string) {
   assertWritable();
   const candidates = exerciseGuideFrames(guide).map((frame) => ({

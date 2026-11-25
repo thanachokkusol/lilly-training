@@ -64,6 +64,7 @@ import {
   moveMachinePhoto,
   addMissingHomeTraining,
   alignOctoberWalkWeeks,
+  removeEmptyNovemberPulldown,
   addBundledMachinePhotos,
 } from "./db";
 import {
@@ -107,6 +108,7 @@ import {
 } from "./cloud";
 import { setReadOnly } from "./db";
 import { TrainerAccounts, ChangePassword } from "./Accounts";
+import PasswordInput from "./PasswordInput";
 /** Common equipment and programs; everything else belongs to one person. */
 const isSharedEntry = (e: Entry) =>
   e.kind === "machine" ||
@@ -447,6 +449,7 @@ export default function App() {
     undefined,
   );
   const syncing = useRef(false);
+  const viewRequest = useRef(0);
   const refresh = async () => {
     setEntries(await allEntries());
     setLoaded(true);
@@ -592,6 +595,9 @@ export default function App() {
   useEffect(() => {
     if (ready && !locked && octoberWalkIds) void run(() => alignOctoberWalkWeeks(octoberWalkIds.split(",")));
   }, [ready, locked, octoberWalkIds]);
+  useEffect(() => {
+    if (ready && !locked && profile?.role === "owner") void run(removeEmptyNovemberPulldown);
+  }, [ready, locked, profile?.role]);
   const hasPushable = entries.some((e) => e.dirty && !e.conflict);
   useEffect(() => {
     if (!canSync || !online || !hasPushable) return;
@@ -608,6 +614,11 @@ export default function App() {
     return () => window.removeEventListener("beforeunload", warn);
   }, [cloudUrl, pending]);
   useEffect(() => {
+    viewRequest.current++;
+    setReadOnly("");
+    setViewing(null);
+    setClientRecords([]);
+    setClients([]);
     if (!authUser || authUser === "local" || !online) {
       setProfile(null);
       return;
@@ -616,13 +627,15 @@ export default function App() {
     void myProfile().then(async (p) => {
       if (!live) return;
       setProfile(p);
-      setClients(p?.role === "trainer" ? await myClients() : []);
-    });
+      const visible = p?.role === "trainer" || p?.role === "owner" ? await myClients(p.role) : [];
+      if (live) setClients(visible);
+    }).catch(() => { if (live) setClients([]); });
     return () => {
       live = false;
     };
   }, [authUser, online]);
   const viewJournal = async (client: Client | null) => {
+    const request = ++viewRequest.current;
     if (!client) {
       setReadOnly("");
       setViewing(null);
@@ -631,6 +644,7 @@ export default function App() {
     }
     try {
       const records = await fetchUserRecords(client.id);
+      if (request !== viewRequest.current) return;
       setReadOnly(`กำลังดูข้อมูลของ ${client.name} · ดูอย่างเดียว กลับไปที่ "ของฉัน" เพื่อบันทึก`);
       setClientRecords(records);
       setViewing(client);
@@ -708,7 +722,7 @@ export default function App() {
                 <option value="">กำลังดู: ของฉัน</option>
                 {clients.map((c) => (
                   <option key={c.id} value={c.id}>
-                    กำลังดู: {c.name} (ลูกเทรน)
+                    กำลังดู: {c.name}
                   </option>
                 ))}
               </select>
@@ -782,6 +796,7 @@ export default function App() {
                 busy={busy}
                 openLogin={() => setLogin(true)}
                 profile={profile}
+                viewJournal={(client) => void viewJournal(client)}
               />
             )}
           </div>
@@ -1247,7 +1262,8 @@ function MachinePicker({
   close: () => void;
 }) {
   const { entries } = useData(),
-    [query, setQuery] = useState("");
+    [query, setQuery] = useState(""),
+    [create, setCreate] = useState(false);
   return (
     <Modal title="เพิ่มท่า" close={close}>
       <div className="form">
@@ -1281,7 +1297,9 @@ function MachinePicker({
             </button>
           ))}
         {gym && <MissingGymMachines gym={gym} entries={entries} choose={choose} query={query} />}
+        {query.trim() && gym && <button className="secondary" onClick={() => setCreate(true)}>+ สร้างท่าใหม่ «{query.trim()}»</button>}
       </div>
+      {create && <MachineForm initialName={query.trim()} fixedGym={gym} close={() => setCreate(false)} onSaved={(_, saved) => choose(saved)} />}
     </Modal>
   );
 }
@@ -1967,17 +1985,21 @@ function MachineForm({
   close,
   onDeleted,
   onSaved,
+  initialName,
+  fixedGym,
 }: {
   entry?: Entry;
   variantOf?: Entry;
   close: () => void;
   onDeleted?: () => void;
-  onSaved?: (id: string) => void;
+  onSaved?: (id: string, entry: Entry) => void;
+  initialName?: string;
+  fixedGym?: string;
 }) {
   const { run, entries } = useData(),
     m = entry?.data as Machine | undefined;
   const gyms = gymsFor(entries).filter((gym) => !gym.archived || gym.id === m?.gym);
-  const [name, setName] = useState(m?.name ?? variantOf?.data.name ?? "");
+  const [name, setName] = useState(m?.name ?? variantOf?.data.name ?? initialName ?? "");
   const [match, setMatch] = useState<Entry | null>(variantOf ?? null);
   const [distinct, setDistinct] = useState(false);
   const suggestions = entry ? [] : exerciseCards(entries, entries.filter((e) =>
@@ -2003,7 +2025,7 @@ function MachineForm({
                 exerciseId: matched ? exerciseKey(matched) : m ? exerciseKey(m) : distinct ? uid() : undefined,
                 aliases: matched?.aliases ?? m?.aliases,
                 label: String(f.get("label")).trim(),
-                gym: f.get("gym"),
+                gym: fixedGym ?? f.get("gym"),
                 group: matched?.group ?? f.get("group"),
                 setup: f.get("setup"),
                 cues: f.get("cues"),
@@ -2012,7 +2034,7 @@ function MachineForm({
               entry?.id,
             );
             close();
-            onSaved?.(saved.id);
+            onSaved?.(saved.id, saved);
           }, "บันทึกเครื่องแล้ว");
         }}
       >
@@ -2028,7 +2050,7 @@ function MachineForm({
             <input name="thai" defaultValue={m?.thai} />
           </Field>
           <Field label="ฟิตเนส">
-            <select name="gym" required defaultValue={m?.gym ?? gyms[0]?.id}>
+            <select name="gym" required disabled={!!fixedGym} defaultValue={fixedGym ?? m?.gym ?? gyms[0]?.id}>
               {!gyms.length && <option value="">เพิ่มยิมในหน้าตั้งค่าก่อน</option>}
               {gyms.map((gym) => <option key={gym.id} value={gym.id}>{gym.name}</option>)}
             </select>
@@ -2114,6 +2136,8 @@ function StartSession({
     [selection, setSelection] = useState(initial),
     [title, setTitle] = useState(initialTitle ?? (initial.length ? "ฝึกเวท" : "Upper Body")),
     [routineNote, setRoutineNote] = useState(initialNote ?? ""),
+    [query, setQuery] = useState(""),
+    [create, setCreate] = useState(false),
     [date, setDate] = useState(today());
   const allMachines = entries.filter(
       (e) => e.kind === "machine" && !e.deleted && !e.data.archived,
@@ -2199,7 +2223,9 @@ function StartSession({
         </div>
         {routineNote && <p className="notice preserve">{routineNote}</p>}
         <p>เลือกท่าตามลำดับที่จะเล่น</p>
-        {machines.map((e) => (
+        <input aria-label="ค้นหาท่าที่จะเลือก" placeholder="ค้นหาท่า" value={query} onChange={(e) => setQuery(e.target.value)} />
+        {machines.filter((e) => selection.includes(e.id) ||
+          `${e.data.name} ${e.data.thai}`.toLowerCase().includes(query.trim().toLowerCase())).map((e) => (
           <label className="select-row" key={e.id}>
             <input
               type="checkbox"
@@ -2224,6 +2250,7 @@ function StartSession({
         <MissingGymMachines key={gym} gym={gym} entries={entries} choose={(picked) =>
           setSelection((current) => current.includes(picked.id) ? current : [...current, picked.id])
         } />
+        {gym && query.trim() && <button className="secondary" onClick={() => setCreate(true)}>+ สร้างท่าใหม่ «{query.trim()}»</button>}
         <button
           className="primary wide"
           disabled={!selectedMachines.length || !date || !title}
@@ -2241,6 +2268,8 @@ function StartSession({
           เริ่มบันทึก {selectedMachines.length} ท่า <ArrowUpRight size={18} />
         </button>
       </div>
+      {create && <MachineForm initialName={query.trim()} fixedGym={gym} close={() => setCreate(false)}
+        onSaved={(id) => setSelection((previous) => [...previous, id])} />}
     </Modal>
   );
 }
@@ -3497,10 +3526,9 @@ function Login({ close, done }: { close: () => void; done: () => void }) {
           />
         </Field>
         <Field label="รหัสผ่าน">
-          <input
+          <PasswordInput
             name="password"
             autoComplete="current-password"
-            type="password"
             required
           />
         </Field>
@@ -3658,11 +3686,13 @@ function SettingsPage({
   busy,
   openLogin,
   profile,
+  viewJournal,
 }: {
   synchronize: () => void;
   busy: boolean;
   openLogin: () => void;
   profile: Profile | null;
+  viewJournal: (client: Client) => void;
 }) {
   const { entries, run, notify } = useData(),
     [cfg, setCfg] = useState(config()),
@@ -3763,14 +3793,14 @@ function SettingsPage({
               <h2>บัญชีของฉัน</h2>
               <p>
                 {profile.displayName} ·{" "}
-                {profile.role === "owner" ? "เจ้าของสมุด" : "เทรนเนอร์"}
+                {profile.role === "owner" ? "เจ้าของสมุด" : profile.role === "trainer" ? "เทรนเนอร์" : "เพื่อน"}
               </p>
             </div>
             <ChangePassword profile={profile} />
           </div>
         </section>
       )}
-      {profile?.role === "owner" && <TrainerAccounts />}
+      {profile?.role === "owner" && <TrainerAccounts viewJournal={viewJournal} />}
       <RestShortcutSettings />
       <section className="panel">
         <h2>เป้าหมายรายสัปดาห์</h2>
@@ -4086,6 +4116,7 @@ function SessionEditorForm({
     [saving, setSaving] = useState(false),
     [addMachine, setAddMachine] = useState(false),
     [confirmDelete, setConfirmDelete] = useState(false),
+    [removeExercise, setRemoveExercise] = useState<number | null>(null),
     [focus, setFocus] = useState<number | null>(() => {
       const machine = focusMachine ?? (source.data.status === "draft" ? readView(`focus:${id}`) : null);
       const i = (source.data as Session).exercises.findIndex(
@@ -4162,6 +4193,9 @@ function SessionEditorForm({
   const doneCount = s.exercises.filter((x) =>
     x.sets.some((a) => a.done),
   ).length;
+  const loggedCount = s.exercises.filter((x) => x.sets.some((set) =>
+    set.done || set.reps != null || set.load != null || !!set.loadText?.trim())).length;
+  const progressCount = s.status === "draft" ? s.exercises.length : loggedCount;
   async function finish() {
     if (finishing.current) return;
     if (!s.date) {
@@ -4282,17 +4316,17 @@ function SessionEditorForm({
                 />
               </Field>
             </div>
-            {s.exercises.length > 0 && (
+            {progressCount > 0 && (
               <div className="progress-line">
                 <div>
                   <span
                     style={{
-                      width: `${(doneCount / s.exercises.length) * 100}%`,
+                      width: `${(doneCount / progressCount) * 100}%`,
                     }}
                   />
                 </div>
                 <small>
-                  เสร็จ {doneCount}/{s.exercises.length} ท่า
+                  เสร็จ {doneCount}/{progressCount} ท่า
                   {s.status === "draft" ? " · บันทึกร่างอัตโนมัติ" : ""}
                 </small>
               </div>
@@ -4356,16 +4390,11 @@ function SessionEditorForm({
                         <ChevronRight size={18} />
                       )}
                     </button>
-                    {s.status === "draft" && (
+                    {(
                       <button
                         className="icon remove"
                         aria-label={`เอา ${m?.name ?? "ท่านี้"} ออกจากการฝึก`}
-                        onClick={() =>
-                          setS((v) => ({
-                            ...v,
-                            exercises: v.exercises.filter((_, n) => n !== i),
-                          }))
-                        }
+                        onClick={() => setRemoveExercise(i)}
                       >
                         <X size={16} />
                       </button>
@@ -4463,6 +4492,18 @@ function SessionEditorForm({
               setAddMachine(false);
             }}
           />
+        )}
+        {removeExercise !== null && (
+          <Modal title="เอาท่านี้ออกจากการฝึก" close={() => setRemoveExercise(null)}>
+            <div className="form">
+              <p>รายการนี้และเซตของท่านี้จะถูกเอาออกจากการฝึกครั้งนี้</p>
+              <button className="danger" onClick={() => {
+                const index = removeExercise;
+                setS((previous) => ({ ...previous, exercises: previous.exercises.filter((_, i) => i !== index) }));
+                setRemoveExercise(null);
+              }}>ยืนยันเอาท่าออก</button>
+            </div>
+          </Modal>
         )}
       </div>
     </Modal>
@@ -4684,7 +4725,6 @@ function ExerciseFocus({
             <button
               className="set-remove"
               aria-label={`ลบเซต ${j + 1}`}
-              disabled={x.sets.length === 1}
               onClick={() =>
                 update({ ...x, sets: x.sets.filter((_, k) => k !== j) })
               }
