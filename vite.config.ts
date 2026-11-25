@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import fs from "node:fs";
 import path from "node:path";
@@ -22,6 +22,8 @@ export default defineConfig({
       },
     },
   },
+  // The first UI render in a file is slow under jsdom, and a timed-out test keeps running into the next one.
+  test: { testTimeout: 30000, hookTimeout: 30000 },
   plugins: [
     react(),
     {

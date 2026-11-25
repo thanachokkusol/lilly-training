@@ -2970,3 +2970,36 @@ summary {
 .viewing .content .sign-out {
   display: inline-flex !important;
 }
+.client-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: 12px;
+}
+.client-card {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  padding: 14px;
+  border: 1px solid #e2e5da;
+  border-radius: 14px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.client-card dl {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  font-size: 13px;
+}
+.client-card dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+.client-card dt {
+  color: #657058;
+}
+.client-card dd {
+  margin: 0;
+  text-align: right;
+}

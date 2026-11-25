@@ -8,11 +8,13 @@ import {
   getSignupSettings,
   setSignupSettings,
   signUp,
+  fetchUserRecords,
   type Profile,
   type Client,
   type Coach,
 } from "./cloud";
 import { Modal, useData } from "./App";
+import { clientSummary, dateLabel, minuteDuration } from "./core";
 import PasswordInput from "./PasswordInput";
 
 type Trainer = {
@@ -275,15 +277,41 @@ export function MyClients({ clients, viewJournal }: { clients: Client[]; viewJou
       {!clients.length && (
         <p className="muted">ยังไม่มีลูกเทรน ลูกเทรนเลือกโค้ชได้เองที่ Settings → โค้ชของฉัน</p>
       )}
-      {clients.map((c) => (
-        <div className="trash-row" key={c.id}>
-          <strong>ลูกเทรน {c.name}</strong>
-          <button className="secondary" onClick={() => viewJournal(c)}>
-            ดูข้อมูล
-          </button>
-        </div>
-      ))}
+      <div className="client-grid">
+        {clients.map((c) => <ClientCard key={c.id} client={c} viewJournal={viewJournal} />)}
+      </div>
     </section>
+  );
+}
+
+function ClientCard({ client, viewJournal }: { client: Client; viewJournal: (client: Client) => void }) {
+  const [summary, setSummary] = useState<ReturnType<typeof clientSummary> | "failed" | null>(null);
+  useEffect(() => {
+    let live = true;
+    setSummary(null);
+    fetchUserRecords(client.id)
+      .then((records) => { if (live) setSummary(clientSummary(records)); })
+      .catch(() => { if (live) setSummary("failed"); });
+    return () => { live = false; };
+  }, [client.id]);
+  return (
+    <article className="client-card">
+      <strong>ลูกเทรน {client.name}</strong>
+      {summary === null ? <p className="muted">กำลังอ่านสรุป…</p> : summary === "failed" ? (
+        <p className="muted">อ่านสรุปไม่สำเร็จ ลองเปิดหน้านี้ใหม่</p>
+      ) : (
+        <dl>
+          <div><dt>คาร์ดิโอรอบนี้</dt>
+            <dd>{minuteDuration(summary.cardioSeconds)} / {summary.goal} นาที</dd></div>
+          <div><dt>เวทรอบนี้</dt><dd>{summary.strength} ครั้ง</dd></div>
+          <div><dt>ยืดรอบนี้</dt><dd>{summary.stretch} ครั้ง</dd></div>
+          <div><dt>บันทึกล่าสุด</dt><dd>{summary.lastDate ? dateLabel(summary.lastDate) : "ยังไม่มีบันทึก"}</dd></div>
+          {summary.weight && <div><dt>น้ำหนักล่าสุด</dt>
+            <dd>{summary.weight.value} กก. · {dateLabel(summary.weight.date)}</dd></div>}
+        </dl>
+      )}
+      <button className="secondary" onClick={() => viewJournal(client)}>ดูข้อมูล</button>
+    </article>
   );
 }
 

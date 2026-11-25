@@ -4,6 +4,7 @@ import {
   weekOf,
   parseTime,
   cardioTotals,
+  clientSummary,
   coachMessage,
   latestExercise,
   ocrCandidates,
@@ -256,5 +257,36 @@ describe("time and reporting", () => {
     expect(latestExercise(es, "we", "2026-11-19", "current")?.entry.id).toBe(
       "old",
     );
+  });
+});
+it("summarizes one client's week with the same rules the client sees", () => {
+  const meta = { version: 1, updatedAt: "2026-11-25T00:00:00Z", dirty: false };
+  const session = (id: string, date: string, status: string, machineIds: string[], deleted = false): any => ({
+    ...meta, id, kind: "session", deleted,
+    data: { date, status, title: id, exercises: machineIds.map((machineId) => ({ machineId, sets: [] })) },
+  });
+  const cardio = (id: string, date: string, week: string, seconds: number, status = "confirmed"): any => ({
+    ...meta, id, kind: "cardio", data: { date, week, seconds, status, activity: "เดิน", distance: null },
+  });
+  const summary = clientSummary([
+    { ...meta, id: "settings-main", kind: "settings", data: { cardioGoal: 120 } } as any,
+    session("strength", "2026-11-23", "completed", ["we-chest"]),
+    session("mixed", "2026-11-24", "completed", ["we-chest", "home-stretch-doorway"]),
+    session("stretch", "2026-11-24", "completed", ["home-stretch-doorway"]),
+    session("draft", "2026-11-25", "draft", ["we-chest"]),
+    session("trashed", "2026-11-25", "completed", ["we-chest"], true),
+    session("old", "2026-11-14", "completed", ["we-chest"]),
+    cardio("now", "2026-11-22", "2026-11-22", 1205),
+    cardio("made-up-for-last-week", "2026-11-23", "2026-11-15", 600),
+    cardio("unchecked", "2026-11-25", "2026-11-22", 900, "review"),
+    { ...meta, id: "body", kind: "body", data: { date: "2026-11-20", weight: 70.5 } } as any,
+    { ...meta, id: "body-waist", kind: "body", data: { date: "2026-11-21", weight: null, waist: 80 } } as any,
+  ], "2026-11-25");
+  expect(summary).toEqual({
+    goal: 120, cardioSeconds: 1205, strength: 2, stretch: 2, lastDate: "2026-11-24",
+    weight: { value: 70.5, date: "2026-11-20" },
+  });
+  expect(clientSummary([], "2026-11-25")).toEqual({
+    goal: 150, cardioSeconds: 0, strength: 0, stretch: 0, lastDate: undefined, weight: undefined,
   });
 });

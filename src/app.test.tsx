@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import "./test-fresh-idb";
 import { it, expect, vi, afterEach } from "vitest";
+import { openDB } from "idb";
 import {
   render,
   screen,
@@ -24,10 +25,14 @@ const topDialog = async () => {
   await screen.findAllByRole("dialog");
   return within(screen.getAllByRole("dialog").at(-1)!);
 };
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   location.hash = "";
   localStorage.clear();
+  // Every test starts with an empty journal, so a failure cannot leave a draft behind for the next one.
+  const db = await openDB("lilly-training-v1");
+  await Promise.all([db.clear("entries"), db.clear("photos")]);
+  db.close();
 });
 it("starts a stretch from a normal Strength tile under the home location", async () => {
   location.hash = "#machines";
@@ -332,6 +337,61 @@ it("starts a session, logs two sets in the focused machine view, and reopens the
     stored?.updatedAt,
   );
 }, 20000);
+it("keeps a finished workout completed when the dialog is closed while it is saving", async () => {
+  await save("machine", {
+    name: "Race Machine", thai: "", gym: "WE Fitness", group: "ขา", setup: "", cues: "", loadMode: "total",
+  }, "race-machine");
+  location.hash = "machines";
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Race Machine/ }));
+  fireEvent.click((await topDialog()).getByRole("button", { name: /เริ่มฝึกท่านี้/ }));
+  fireEvent.change(await screen.findByRole("spinbutton", { name: "เซต 1 น้ำหนัก" }), { target: { value: "20" } });
+  fireEvent.change(screen.getByRole("spinbutton", { name: "เซต 1 จำนวนครั้ง" }), { target: { value: "12" } });
+  fireEvent.click(screen.getByRole("button", { name: "ยืนยันเซต 1" }));
+  fireEvent.click(screen.getByRole("button", { name: "กลับรายการ" }));
+  fireEvent.click(await screen.findByRole("button", { name: "จบการฝึก" }));
+  fireEvent.click((await topDialog()).getByRole("button", { name: "ปิด" }));
+  await waitFor(() => expect(screen.queryByRole("button", { name: "จบการฝึก" })).toBeNull());
+  await new Promise((resolve) => setTimeout(resolve, 800));
+  const session = (await allEntries()).find((entry) => entry.kind === "session");
+  expect(session?.data.status).toBe("completed");
+});
+it("attaches a pasted image to the cardio log as evidence", async () => {
+  vi.stubGlobal("createImageBitmap", async () => ({ width: 10, height: 10, close() {} }));
+  const context = vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({ drawImage() {} } as any);
+  const toBlob = vi.spyOn(HTMLCanvasElement.prototype, "toBlob")
+    .mockImplementation((done) => done(new Blob(["photo"], { type: "image/jpeg" })));
+  const objectUrl = Object.getOwnPropertyDescriptor(URL, "createObjectURL");
+  Object.defineProperty(URL, "createObjectURL", { configurable: true, value: () => "blob:test" });
+  Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: () => {} });
+  const paste = (file: File) => {
+    const event = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "clipboardData", { value: { files: [file] } });
+    fireEvent(document.body, event);
+  };
+  const photos = async () => (await allEntries()).filter((entry) => entry.kind === "photo");
+  try {
+    location.hash = "#cardio";
+    render(<App />);
+    const add = (await screen.findAllByRole("button", { name: "บันทึกคาร์ดิโอ" }))[0];
+    paste(new File(["x"], "screen.png", { type: "image/png" }));
+    expect(await photos()).toHaveLength(0);
+    fireEvent.click(add);
+    await topDialog();
+    paste(new File(["x"], "notes.txt", { type: "text/plain" }));
+    paste(new File(["x"], "screen.png", { type: "image/png" }));
+    await waitFor(async () => expect(await photos()).toHaveLength(1));
+    expect(await screen.findByAltText("หลักฐานคาร์ดิโอ")).toBeTruthy();
+  } finally {
+    context.mockRestore();
+    toBlob.mockRestore();
+    vi.stubGlobal("createImageBitmap", undefined);
+    if (objectUrl) Object.defineProperty(URL, "createObjectURL", objectUrl);
+    else Reflect.deleteProperty(URL, "createObjectURL");
+    Reflect.deleteProperty(URL, "revokeObjectURL");
+    cleanup();
+  }
+});
 it("opens set entry within two taps from a machine and joins today's draft", async () => {
   await save(
     "machine",

@@ -235,7 +235,7 @@ export const minuteDuration = (s: number) => {
   const n = Math.max(0, Math.round(s));
   return `${Math.floor(n / 60)} นาที ${(n % 60).toString().padStart(2, "0")} วินาที`;
 };
-const activityEmoji = (a: string) =>
+export const activityEmoji = (a: string) =>
   a.includes("มวย")
     ? "🥊"
     : a.includes("เดิน")
@@ -381,4 +381,26 @@ export function ocrCandidates(text: string) {
     ),
   ];
   return { times, distances };
+}
+/** What a coach sees at a glance for one client; counts use the same rules as the client's own Today page. */
+export function clientSummary(records: Entry[], now = today()) {
+  const active = records.filter((e) => !e.deleted);
+  const week = weekOf(now);
+  const goal: number = active.find((e) => e.id === "settings-main")?.data.cardioGoal ?? 150;
+  const sessions = active.filter((e) => e.kind === "session" && e.data.status === "completed" &&
+    e.data.date >= week && e.data.date <= addDays(week, 6));
+  const stretches = (e: Entry) => (e.data as Session).exercises.filter(({ machineId }) => isStretch(machineId));
+  const dated = active
+    .filter((e) => e.data.date && e.data.date <= now && ((e.kind === "session" && e.data.status !== "draft") ||
+      (e.kind === "cardio" && e.data.status === "confirmed") || e.kind === "body"))
+    .sort((a, b) => b.data.date.localeCompare(a.data.date) || b.updatedAt.localeCompare(a.updatedAt));
+  const body = dated.find((e) => e.kind === "body" && e.data.weight != null);
+  return {
+    goal,
+    cardioSeconds: cardioTotals(active, week).seconds,
+    strength: sessions.filter((e) => e.data.exercises.length === 0 || stretches(e).length < e.data.exercises.length).length,
+    stretch: sessions.filter((e) => stretches(e).length > 0).length,
+    lastDate: dated[0]?.data.date as string | undefined,
+    weight: body ? { value: body.data.weight as number, date: body.data.date as string } : undefined,
+  };
 }

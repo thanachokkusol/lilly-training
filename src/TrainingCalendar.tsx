@@ -89,6 +89,9 @@ export default function TrainingCalendar({ entries }: { entries: Entry[] }) {
                     return (
                       <div key={exercise.machineId}>
                         <p>{names.get(exercise.machineId) ?? exercise.originalName ?? "ท่าที่บันทึกไว้"}</p>
+                        {exercise.originalName && names.has(exercise.machineId) && names.get(exercise.machineId) !== exercise.originalName && (
+                          <small className="muted">บันทึกเดิม: {exercise.originalName}</small>
+                        )}
                         <ul>{done.map((set) => <li key={set.id}>{formatSet(set, exercise.loadMode)}{set.warmup && " (วอร์ม)"}</li>)}</ul>
                       </div>
                     );

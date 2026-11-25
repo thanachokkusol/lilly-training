@@ -91,6 +91,7 @@ import {
   exerciseKey,
   machinePhotoIds,
   totalLoad,
+  activityEmoji,
 } from "./core";
 import {
   cloud,
@@ -107,7 +108,8 @@ import {
   type Profile,
   type Client,
 } from "./cloud";
-import { setReadOnly } from "./db";
+import { isReadOnly, setReadOnly } from "./db";
+import { usePastedImage } from "./usePastedImage";
 import {
   TrainerAccounts,
   ChangePassword,
@@ -1089,7 +1091,7 @@ function Today({ nav }: { nav: (p: string) => void }) {
           onClick={() => e.kind === "cardio" ? setCardioId(e.id) : setSession(e.id)}
         >
           <span className="icon-disc">
-            {e.kind === "cardio" ? <Footprints size={20} /> : <Dumbbell size={20} />}
+            {e.kind === "cardio" ? activityEmoji(e.data.activity) : <Dumbbell size={20} />}
           </span>
           <div>
             <strong>{e.kind === "cardio" ? e.data.activity : e.data.title}</strong>
@@ -1616,12 +1618,14 @@ function MachineDetail({ id, close, selectMachine }: {
     [showAll, setShowAll] = useState(false),
     [session, setSession] = useState<string | null>(null);
   const touchStart = useRef<number | null>(null);
+  const body = useRef<HTMLDivElement>(null);
   const guide = e ? exerciseGuide(e.data.name) : undefined;
   const hasBundledPhotos = !guide || exerciseGuideFrames(guide).every((frame) =>
     entries.some((item) => item.id === `guide-photo-${id}-${frame}`),
   );
   useEffect(() => {
-    if (e && guide && !hasBundledPhotos)
+    // Viewing a client's journal is read-only, so never add the bundled photos from there.
+    if (e && guide && !hasBundledPhotos && !isReadOnly())
       void run(() => addBundledMachinePhotos(id, e.data.name, guide));
   }, [id, guide, hasBundledPhotos]);
   if (!e) return null;
@@ -1667,6 +1671,7 @@ function MachineDetail({ id, close, selectMachine }: {
       setPreviewId(null);
     }, "เพิ่มรูปและตั้งเป็นรูปหลักแล้ว");
   }
+  usePastedImage(body, upload);
   const begin = () =>
     run(async () => {
       if (beginBusy) return;
@@ -1726,7 +1731,7 @@ function MachineDetail({ id, close, selectMachine }: {
           <button disabled={photoIndex >= photos.length - 1} onClick={() => setPreviewId(photos[photoIndex + 1].id)}>รูปถัดไป</button>
         </div>
       )}
-      <div className="detail-body">
+      <div className="detail-body" ref={body}>
         <div className="focus-title">
           <small>
             {gymName(entries, m.gym)} · {m.group} · {loadLabel(m.loadMode)}
@@ -1784,6 +1789,7 @@ function MachineDetail({ id, close, selectMachine }: {
         </div>
         <div>
           <h4>รูปเครื่อง</h4>
+          <p className="muted">วางรูปที่คัดลอกไว้เพื่อเพิ่มรูปได้</p>
           <div className="photo-strip">
             {photos.map((p) => (
               <button
@@ -2502,9 +2508,9 @@ function CardioPage({ openReport = false }: { openReport?: boolean }) {
         {logs.map((e) => (
           <button key={e.id} className="cardio-row" onClick={() => setEdit(e)}>
             <span
-              className={`activity-disc ${e.data.activity === "ต่อยมวย" ? "boxing" : ""}`}
+              className={`activity-disc ${e.data.activity.includes("มวย") ? "boxing" : ""}`}
             >
-              {e.data.activity === "ต่อยมวย" ? "🥊" : <Footprints />}
+              {activityEmoji(e.data.activity)}
             </span>
             <div className="cardio-info">
               <strong>{e.data.activity}</strong>
@@ -2672,6 +2678,7 @@ function CardioForm({ entry, close }: { entry?: Entry; close: () => void }) {
       setOcr(f);
     });
   };
+  usePastedImage(form, upload);
   return (
     <Modal title={entry ? "แก้ไขล็อกคาร์ดิโอ" : "บันทึกคาร์ดิโอ"} close={close}>
       <form
@@ -2764,7 +2771,7 @@ function CardioForm({ entry, close }: { entry?: Entry; close: () => void }) {
         <div className="upload-drop">
           <ImagePlus size={26} />
           <h3>เริ่มจากรูปหน้าจอเครื่องได้เลย</h3>
-          <p>อ่านตัวเลขในเครื่องนี้ แล้วตรวจให้ตรงก่อนยืนยัน</p>
+          <p>อ่านตัวเลขในเครื่องนี้ แล้วตรวจให้ตรงก่อนยืนยัน · วางรูปที่คัดลอกไว้ได้เลย</p>
           <div className="upload-row">
             <label className="secondary">
               <Camera size={17} />
@@ -3224,9 +3231,20 @@ export function BodyForm({
   const draft = useFormDraft("body", entry);
   const [revision, setRevision] = useState(0);
   const [photoId, setPhotoId] = useState<string | undefined>(draft.initial.photoId ?? entry?.data.photoId);
+  const formRef = useRef<HTMLFormElement>(null);
+  const attach = (file?: File) => {
+    const form = formRef.current;
+    if (file && form) void run(async () => {
+      const id = await addPhoto(file, "ผลวัดร่างกาย");
+      setPhotoId(id);
+      draft.write({ ...draft.read(form), photoId: id });
+    });
+  };
+  usePastedImage(formRef, attach);
   return (
     <Modal title="บันทึกผลวัดร่างกาย" close={close}>
       <form
+        ref={formRef}
         key={revision}
         className="form"
         onChange={(e) => draft.write({ ...draft.read(e.currentTarget), ...(photoId && { photoId }) })}
@@ -3310,20 +3328,12 @@ export function BodyForm({
         </Field>
         <label className="secondary">
           <ImagePlus size={18} />
-          แนบผล InBody
+          แนบผล InBody (หรือวางรูปที่คัดลอกไว้)
           <input
             hidden
             type="file"
             accept="image/*"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              const form = e.currentTarget.form;
-              if (f && form) void run(async () => {
-                const id = await addPhoto(f, "ผลวัดร่างกาย");
-                setPhotoId(id);
-                draft.write({ ...draft.read(form), photoId: id });
-              });
-            }}
+            onChange={(e) => attach(e.target.files?.[0])}
           />
         </label>
         {photoId && (
@@ -3409,7 +3419,7 @@ function HistoryPage() {
               {e.kind === "session" ? (
                 <Dumbbell />
               ) : e.kind === "cardio" ? (
-                <Footprints />
+                activityEmoji(e.data.activity)
               ) : (
                 <Scale />
               )}
@@ -4222,25 +4232,31 @@ function SessionEditorForm({
     }
     finishing.current = true;
     setSaving(true);
+    let finished = false;
     await run(
       async () => {
         await saveDraft({
           ...s,
           status: s.status === "draft" ? "completed" : s.status,
         });
+        finished = true;
         writeView(`focus:${id}`, null);
         close();
       },
       s.status === "draft" ? "บันทึกการฝึกแล้ว" : "บันทึกการแก้ไขแล้ว",
     );
+    // After a successful finish this form still holds the draft copy, so it must never save again.
+    if (finished) return;
     finishing.current = false;
     setSaving(false);
   }
-  const keep = () =>
-    run(async () => {
+  const keep = () => {
+    if (finishing.current) return;
+    return run(async () => {
       await saveDraft(latest.current);
       close();
     });
+  };
   const x = focus !== null ? s.exercises[focus] : undefined;
   const m = x
     ? (entries.find((e) => e.id === x.machineId)?.data as Machine | undefined)
@@ -4377,6 +4393,9 @@ function SessionEditorForm({
                           </small>
                         )}
                         {x.setup && <small className="muted">{x.setup}</small>}
+                        {m && x.originalName && x.originalName !== m.name && (
+                          <small className="muted">บันทึกเดิม: {x.originalName}</small>
+                        )}
                       </span>
                       {done.length ? (
                         <span className="state-badge">
