@@ -2616,7 +2616,7 @@ function RestTimer({ sessionId }: { sessionId: string }) {
   );
 }
 function CardioPage({ openReport = false }: { openReport?: boolean }) {
-  const { entries, notify, run } = useData(),
+  const { entries, notify, run, copy: copyOut } = useData(),
     [storedWeek, setWeek] = useRememberedView("cardio-week", weekOf(today())),
     [date, setDate] = useState(today()),
     [reportWeek, setReportWeek] = useState(weekOf(today())),
@@ -2844,7 +2844,7 @@ function CardioPage({ openReport = false }: { openReport?: boolean }) {
             <button
               className="primary wide"
               onClick={() =>
-                copy(message, "คัดลอกแล้ว พร้อมส่งให้โค้ช")
+                copyOut(message, "คัดลอกแล้ว พร้อมส่งให้โค้ช")
               }
             >
               <Copy size={17} />
