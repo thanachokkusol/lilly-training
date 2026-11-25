@@ -2958,3 +2958,15 @@ summary {
   gap: 10px;
   padding: 10px 0;
 }
+.account-panel .sign-out {
+  margin-left: auto;
+  color: #fff;
+  background: #c0392b;
+  border-color: #c0392b;
+}
+.account-panel .sign-out:hover {
+  background: #a93226;
+}
+.viewing .content .sign-out {
+  display: inline-flex !important;
+}

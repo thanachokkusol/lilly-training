@@ -3721,6 +3721,41 @@ function SettingsPage({
         title="Settings"
         subtitle={showOwnerSettings ? "การซิงก์ เป้าหมาย โปรแกรมฝึก และการสำรองข้อมูล" : undefined}
       />
+      {profile && (
+        <section className="panel account-panel">
+          <div className="section-title">
+            <div>
+              <h2>บัญชีของฉัน</h2>
+              <p>
+                {profile.displayName} ·{" "}
+                {profile.role === "owner" ? "เจ้าของสมุด" : profile.role === "trainer" ? "เทรนเนอร์" : "เพื่อน"}
+              </p>
+            </div>
+          </div>
+          <div className="upload-row">
+            <EditDisplayName profile={profile} />
+            <ChangePassword profile={profile} />
+            <button className="danger sign-out" onClick={signOut}>
+              ออกจากระบบ
+            </button>
+          </div>
+        </section>
+      )}
+      {profile?.role === "trainer" && (
+        <MyClients clients={clients} viewJournal={viewJournal} />
+      )}
+      {profile && profile.role !== "trainer" && <MyCoaches />}
+      {profile?.role === "owner" && <SignupSettings />}
+      {profile?.role === "owner" && <TrainerAccounts />}
+      {!profile && user && (
+        <section className="panel account-panel">
+          <div className="upload-row">
+            <button className="danger sign-out" onClick={signOut}>
+              ออกจากระบบ
+            </button>
+          </div>
+        </section>
+      )}
       {showOwnerSettings && <section className="panel">
         <div className="section-title">
           <div>
@@ -3754,14 +3789,6 @@ function SettingsPage({
               </button>
             </>
           )}
-          {user && (
-            <button
-              className="text-button"
-              onClick={signOut}
-            >
-              ออกจากระบบ
-            </button>
-          )}
         </div>
         <p className="muted">
           ข้อมูลและรูปส่วนตัวอยู่ในฐานข้อมูล ไม่อยู่ในโค้ด GitHub · รอซิงก์{" "}
@@ -3770,28 +3797,6 @@ function SettingsPage({
       </section>}
       <RoutineSettings />
       {showOwnerSettings && <><GymSettings /><ReviewedSessionMigration /></>}
-      {profile && (
-        <section className="panel">
-          <div className="section-title">
-            <div>
-              <h2>บัญชีของฉัน</h2>
-              <p>
-                {profile.displayName} ·{" "}
-                {profile.role === "owner" ? "เจ้าของสมุด" : profile.role === "trainer" ? "เทรนเนอร์" : "เพื่อน"}
-              </p>
-            </div>
-            <EditDisplayName profile={profile} />
-            <ChangePassword profile={profile} />
-            {!showOwnerSettings && <button className="text-button" onClick={signOut}>ออกจากระบบ</button>}
-          </div>
-        </section>
-      )}
-      {profile?.role === "trainer" && (
-        <MyClients clients={clients} viewJournal={viewJournal} />
-      )}
-      {profile && profile.role !== "trainer" && <MyCoaches />}
-      {profile?.role === "owner" && <SignupSettings />}
-      {profile?.role === "owner" && <TrainerAccounts />}
       {showOwnerSettings && <RestShortcutSettings />}
       <section className="panel">
         <h2>เป้าหมายรายสัปดาห์</h2>
