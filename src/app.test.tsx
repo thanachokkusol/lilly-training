@@ -198,6 +198,7 @@ it("starts today's home program with planned sets, guide photos and the cool-dow
 it("explains a stretch before starting, lets the person set it, press each repetition or log it without a timer", async () => {
   location.hash = "#machines";
   render(<App />);
+  fireEvent.change(await screen.findByLabelText("ฟิตเนส"), { target: { value: "ที่บ้าน" } });
   fireEvent.click(await screen.findByRole("button", { name: /Wall Chest Stretch \(Elbow\)/ }));
   expect((await topDialog()).getByText("ค้าง 10 วิ × 3 ครั้งต่อข้าง")).toBeTruthy();
   fireEvent.click((await topDialog()).getByRole("button", { name: /เริ่มฝึกท่านี้/ }));
@@ -263,9 +264,12 @@ it("adds how-to to a machine we already have without touching its name, notes, p
 it("adds a library exercise once without a gym and records it by time", async () => {
   location.hash = "#machines";
   render(<App />);
-  fireEvent.click(await screen.findByRole("button", { name: "คลังท่าสากล" }));
-  expect(await screen.findByText("427 ท่า")).toBeTruthy();
-  fireEvent.change(screen.getByLabelText("ค้นหาในคลังท่า"), { target: { value: "side plank" } });
+  const locationFilter = await screen.findByLabelText("ฟิตเนส") as HTMLSelectElement;
+  expect(locationFilter.value).toBe("WE Fitness");
+  expect(screen.queryByRole("group", { name: "แสดง" })).toBeNull();
+  fireEvent.change(locationFilter, { target: { value: "ไม่ระบุยิม" } });
+  expect(await screen.findByRole("button", { name: /แสดงเพิ่ม/ })).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("ค้นหาเครื่อง"), { target: { value: "side plank" } });
   const open = async () => {
     fireEvent.click(await screen.findByRole("button", { name: /Side Plank/ }));
     return topDialog();
@@ -275,8 +279,9 @@ it("adds a library exercise once without a gym and records it by time", async ()
   fireEvent.click(dialog.getByRole("button", { name: "เพิ่มท่านี้" }));
   await screen.findByRole("button", { name: /เริ่มฝึกท่านี้/ });
   fireEvent.click((await topDialog()).getByRole("button", { name: "ปิด" }));
+  expect(screen.getAllByRole("heading", { name: /^Side Plank(?: ·|$)/ })).toHaveLength(1);
   dialog = await open();
-  fireEvent.click(dialog.getByRole("button", { name: "เปิดเครื่องนี้" }));
+  expect(dialog.getByRole("button", { name: /เริ่มฝึกท่านี้/ })).toBeTruthy();
   const machines = (await allEntries()).filter((e) => e.kind === "machine" && e.data.catalogId && !e.deleted);
   expect(machines.map((e) => [e.data.name, e.data.gym, e.data.record, e.data.category])).toEqual([["Side Plank", "ไม่ระบุยิม", "time", "abdominals"]]);
   fireEvent.click((await topDialog()).getByRole("button", { name: /เริ่มฝึกท่านี้/ }));
@@ -293,6 +298,61 @@ it("adds a library exercise once without a gym and records it by time", async ()
     expect(session.exercises[0]).toMatchObject({ record: "time", loadMode: "bodyweight", sets: [{ holdSeconds: 45, timed: true, reps: 1, done: true }] });
   });
 }, 20000);
+it("keeps unidentified Jett entries and their photos in Settings until the owner links a move", async () => {
+  const pendingIds = [2, 3, 7, 15, 18];
+  for (const page of pendingIds) {
+    const id = `jett-extra-${page}`;
+    const photoId = `photo-${id}`;
+    await save("photo", { machineId: id, mime: "image/jpeg", label: "" }, photoId);
+    await save("machine", {
+      name: `เครื่อง Jett หน้า ${page} · รอยืนยันชื่อ`, thai: "", gym: "Jett", group: "อื่น ๆ",
+      setup: "", cues: "", loadMode: "total", photoId,
+    }, id);
+  }
+  const before = (await allEntries()).filter((entry) => entry.id.includes("jett-extra-"));
+  location.hash = "#machines";
+  render(<App />);
+  fireEvent.change(await screen.findByLabelText("ฟิตเนส"), { target: { value: "Jett" } });
+  expect(screen.queryByRole("button", { name: /รอยืนยันชื่อ/ })).toBeNull();
+  fireEvent.click(screen.getAllByRole("button", { name: "Settings" })[0]);
+  expect(await screen.findByRole("heading", { name: "เครื่อง Jett ที่รอตอบ" })).toBeTruthy();
+  expect(screen.getAllByRole("heading", { name: /รอยืนยันชื่อ/ })).toHaveLength(5);
+  expect((await allEntries()).filter((entry) => entry.id.includes("jett-extra-"))).toEqual(before);
+  fireEvent.click(screen.getAllByRole("button", { name: "เลือกท่าจากรายการ" })[0]);
+  const answer = screen.getByLabelText(/เลือกท่าสำหรับ เครื่อง Jett หน้า 2/);
+  const option = await within(answer).findByRole("option", { name: /^Chest Press \(Machine\)/ }) as HTMLOptionElement;
+  fireEvent.change(answer, { target: { value: option.value } });
+  fireEvent.click(screen.getByRole("button", { name: "ยืนยันคำตอบ" }));
+  await waitFor(() => expect(screen.getAllByRole("heading", { name: /รอยืนยันชื่อ/ })).toHaveLength(4));
+  const after = await allEntries();
+  expect(after.find((entry) => entry.id === "jett-extra-2")?.data).toEqual({
+    ...before.find((entry) => entry.id === "jett-extra-2")!.data, catalogId: option.value,
+  });
+  expect(after.find((entry) => entry.id === "photo-jett-extra-2")).toEqual(before.find((entry) => entry.id === "photo-jett-extra-2"));
+  fireEvent.click(screen.getAllByRole("button", { name: "Strength" })[0]);
+  expect((await screen.findByLabelText("ฟิตเนส") as HTMLSelectElement).value).toBe("Jett");
+  expect(await screen.findAllByRole("button", { name: /เครื่อง Jett หน้า 2 · รอยืนยันชื่อ/ })).toHaveLength(1);
+});
+it("uses the original machine card for a matching catalog move in all locations", async () => {
+  const machine = { name: "Chest Press", thai: "", gym: "WE Fitness", group: "อก", setup: "เบาะระดับ 6",
+    cues: "", loadMode: "total", aliases: ["ดันอกที่ WE"] };
+  await save("machine", machine, "we-chest");
+  location.hash = "#machines";
+  render(<App />);
+  const gym = await screen.findByLabelText("ฟิตเนส");
+  fireEvent.change(gym, { target: { value: "ไม่ระบุยิม" } });
+  expect(await screen.findByRole("button", { name: /แสดงเพิ่ม/ })).toBeTruthy();
+  const search = screen.getByLabelText("ค้นหาเครื่อง");
+  fireEvent.change(search, { target: { value: "Chest Press (Machine)" } });
+  expect(screen.queryByText("Chest Press (Machine)")).toBeNull();
+  fireEvent.change(gym, { target: { value: "" } });
+  expect(await screen.findAllByRole("heading", { name: "Chest Press" })).toHaveLength(1);
+  expect(screen.queryByText("Chest Press (Machine)")).toBeNull();
+  fireEvent.change(search, { target: { value: "ดันอกที่ WE" } });
+  fireEvent.change(screen.getByLabelText("อุปกรณ์"), { target: { value: "machine" } });
+  fireEvent.click(screen.getByRole("heading", { name: "Chest Press" }));
+  expect((await topDialog()).getByText("เบาะระดับ 6")).toBeTruthy();
+});
 it("removes an unused gym from every list but never one with history", async () => {
   const machine = { name: "Old Press", thai: "", group: "อก", setup: "", cues: "", loadMode: "total" };
   await save("machine", { ...machine, gym: "อื่น ๆ", archived: true }, "old-other");

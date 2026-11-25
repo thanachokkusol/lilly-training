@@ -145,8 +145,10 @@ import StrengthTile from "./StrengthTile";
 import SetTable from "./SetTable";
 import { copyText } from "./clipboard";
 import WorkoutSummary, { MachineInsights, WorkoutNumbers } from "./WorkoutSummary";
-import { CatalogBrowser, CatalogSearch, HowTo, useCatalog } from "./ExerciseLibrary";
-import { noGym } from "./catalog";
+import { CatalogDetail, CatalogSearch, HowTo, ImageCredit, catalogImageUrl, useCatalog } from "./ExerciseLibrary";
+import { equipmentLabels, matchesExercise, noGym, searchCatalog, type CatalogItem } from "./catalog";
+import { catalogLinks } from "./catalogLinks";
+import { isPendingMachine } from "./pendingMachines";
 import { catalogIdOf, categoryLabel, categoryOf, legacyGroup, legMuscles, muscleIds, muscleLabels, musclesFor, muscleText, stretchCategory } from "./muscles";
 import { kg, recordLabels, sessionSets, sessionVolume, setRecords, setsBefore, previousExercise, warmupSets } from "./workoutStats";
 type Context = {
@@ -244,10 +246,12 @@ function Photo({
   id,
   alt,
   className = "",
+  lazy = false,
 }: {
   id?: string;
   alt: string;
   className?: string;
+  lazy?: boolean;
 }) {
   const [src, setSrc] = useState("");
   const { entries, readOnly } = useData();
@@ -275,7 +279,7 @@ function Photo({
     };
   }, [id, path, version, updatedAt]);
   return src ? (
-    <img className={className} src={src} alt={alt} />
+    <img className={className} src={src} alt={alt} loading={lazy ? "lazy" : undefined} />
   ) : (
     <div className={`photo-empty ${className}`}>
       <Dumbbell size={36} />
@@ -956,7 +960,7 @@ function Today({ nav }: { nav: (p: string) => void }) {
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0],
     routines = active.filter((e) => e.kind === "routine" && !isObsoleteHomeRoutine(e))
       .sort((a, b) => (a.data.folder ?? "").localeCompare(b.data.folder ?? "", "th")),
-    machines = active.filter((e) => e.kind === "machine" && !e.data.archived && e.data.gym !== homeGym),
+    machines = active.filter((e) => e.kind === "machine" && !e.data.archived && !isPendingMachine(e) && e.data.gym !== homeGym),
     last = active
       .filter(
         (e) => e.data.date && (e.kind === "cardio" || (e.kind === "session" && e.data.status !== "draft")),
@@ -973,7 +977,7 @@ function Today({ nav }: { nav: (p: string) => void }) {
   const lastWorkout = active.filter((e) => e.kind === "session" && e.data.status === "completed")
     .sort((a, b) => b.data.date.localeCompare(a.data.date) || b.updatedAt.localeCompare(a.updatedAt))[0];
   const repeatMachines = ((lastWorkout?.data.exercises ?? []) as ExerciseLog[])
-    .map(({ machineId }) => active.find((entry) => entry.id === machineId && entry.kind === "machine" && !entry.data.archived))
+    .map(({ machineId }) => active.find((entry) => entry.id === machineId && entry.kind === "machine" && !entry.data.archived && !isPendingMachine(entry)))
     .filter((entry): entry is Entry => Boolean(entry));
   const repeatGym = repeatMachines[0]?.data.gym;
   const repeatable = repeatMachines.length > 0 && repeatMachines.every((entry) => entry.data.gym === repeatGym) &&
@@ -1269,7 +1273,7 @@ function MissingGymMachines({
 }) {
   const { run } = useData();
   const creating = useRef(false);
-  const available = entries.filter((entry) => entry.kind === "machine" && !entry.deleted && !entry.data.archived);
+  const available = entries.filter((entry) => entry.kind === "machine" && !entry.deleted && !entry.data.archived && !isPendingMachine(entry));
   const local = new Set(available.filter((entry) => entry.data.gym === gym).map((entry) => exerciseKey(entry.data)));
   const missing = exerciseCards(entries, available.filter((entry) =>
     !local.has(exerciseKey(entry.data)) &&
@@ -1367,6 +1371,7 @@ function MachinePicker({
               e.kind === "machine" &&
               !e.deleted &&
               !e.data.archived &&
+              !isPendingMachine(e) &&
               (!gym || e.data.gym === gym) &&
               !excluded.includes(e.id) &&
               `${e.data.name} ${e.data.thai}`
@@ -1408,7 +1413,7 @@ function RoutineSettings() {
   });
   const routines = entries.filter((e) => e.kind === "routine" && !e.deleted && !isObsoleteHomeRoutine(e)),
     machines = entries.filter(
-      (e) => e.kind === "machine" && !e.deleted && !e.data.archived,
+      (e) => e.kind === "machine" && !e.deleted && !e.data.archived && !isPendingMachine(e),
     );
   return (
     <section className="panel">
@@ -1574,24 +1579,29 @@ function RoutineSettings() {
     </section>
   );
 }
-function exerciseCards(entries: Entry[], machines: Entry[]) {
+function exerciseCards(entries: Entry[], machines: Entry[], combineCatalog = false) {
   const byExercise = new Map<string, { machine: Entry; date: string }>();
   for (const machine of machines) {
-    const key = exerciseKey(machine.data);
+    const catalogId = combineCatalog ? catalogIdOf(machine.data) : undefined;
+    const key = catalogId ? `catalog:${catalogId}` : exerciseKey(machine.data);
     const last = latestExercise(entries, machine.id, today())?.entry;
     const date = last ? `${last.data.date}/${last.updatedAt}` : "";
     const current = byExercise.get(key);
-    if (!current || date > current.date) byExercise.set(key, { machine, date });
+    if (!current || date > current.date || (date === current.date && (
+      (current.machine.data.archived && !machine.data.archived) ||
+      (current.machine.id.startsWith("hevy-") && !machine.id.startsWith("hevy-"))
+    ))) byExercise.set(key, { machine, date });
   }
   return [...byExercise.values()]
     .sort((a, b) => b.date.localeCompare(a.date) || a.machine.data.name.localeCompare(b.machine.data.name))
     .map(({ machine }) => machine);
 }
 
-function machineVariants(entries: Entry[], machine: Machine) {
+function machineVariants(entries: Entry[], machine: Machine, includeCatalog = false) {
+  const catalogId = includeCatalog ? catalogIdOf(machine) : undefined;
   return entries.filter((e) =>
-    e.kind === "machine" && !e.deleted && !e.data.archived &&
-    exerciseKey(e.data) === exerciseKey(machine),
+    e.kind === "machine" && !e.deleted && !e.data.archived && !isPendingMachine(e) &&
+    (exerciseKey(e.data) === exerciseKey(machine) || (catalogId && catalogIdOf(e.data) === catalogId)),
   );
 }
 
@@ -1603,7 +1613,7 @@ function MachineCover({ entry, entries }: { entry: Entry; entries: Entry[] }) {
   const replaced = coverPhoto === `guide-photo-${entry.id}-0` && frame !== 0;
   return guide && (replaced || (!coverPhoto && !entries.some((item) => item.id === `guide-photo-${entry.id}-${frame}`)))
     ? <img loading="lazy" src={`${import.meta.env.BASE_URL}exercise-guides/${guide}/${frame}.jpg`} alt={`ภาพประกอบ ${m.name}`} />
-    : <Photo id={coverPhoto} alt={m.name} />;
+    : <Photo id={coverPhoto} alt={m.name} lazy />;
 }
 
 /** The machine's own photo, or both frames of the bundled guide for a home exercise. */
@@ -1618,7 +1628,7 @@ function MachinePhoto({ id }: { id: string }) {
   ))}</> : <Photo id={main} alt={entry.data.name} />;
 }
 
-function MachineTile({ e, onClick }: { e: Entry; onClick: () => void }) {
+function MachineTile({ e, category = categoryOf(e.data), onClick }: { e: Entry; category?: string; onClick: () => void }) {
   const { entries } = useData(),
     m = e.data as Machine,
     last = latestExercise(entries, e.id, today());
@@ -1627,10 +1637,10 @@ function MachineTile({ e, onClick }: { e: Entry; onClick: () => void }) {
     "incline press": "ดันอกแนวเฉียงขึ้น",
   } as Record<string, string>)[m.name.trim().toLowerCase()];
   return (
-    <StrengthTile name={m.name} thai={thai} group={categoryLabel(categoryOf(m))} location={gymName(entries, m.gym)} onClick={onClick}
+    <StrengthTile name={m.name} thai={thai} group={categoryLabel(category)} location={gymName(entries, m.gym)} onClick={onClick}
       photo={<MachineCover entry={e} entries={entries} />}>
         <p className="muted">
-          มีเครื่องที่: {[...new Set(machineVariants(entries, m).map((x) => gymName(entries, x.data.gym)))].join(" · ")}
+          มีเครื่องที่: {[...new Set(machineVariants(entries, m, true).map((x) => gymName(entries, x.data.gym)))].join(" · ")}
         </p>
         <div className="last-load">
           {last ? (
@@ -1652,49 +1662,68 @@ function MachineTile({ e, onClick }: { e: Entry; onClick: () => void }) {
   );
 }
 function Machines() {
-  const { entries, run } = useData(),
+  const { entries, readOnly } = useData(),
     [query, setQuery] = useState(""),
-    [gym, setGym] = useState(""),
+    [savedGym, setSavedGym] = useState(() => {
+      try { return localStorage.getItem(viewStorageKey("strength-gym")); } catch { return null; }
+    }),
     [savedGroup, setGroup] = useRememberedView("strength-category", "ทั้งหมด"),
     [selected, setSelected] = useRememberedView("machine-detail"),
-    [view, setView] = useRememberedView("strength-view", "mine"),
+    [catalogSelection, setCatalogSelection] = useState<CatalogItem | null>(null),
+    [equipment, setEquipment] = useState(""),
+    [shown, setShown] = useState(40),
     [create, setCreate] = useState(false),
     [showArchived, setShowArchived] = useState(false);
-  const used = new Set(entries.filter((e) => e.kind === "machine" && !e.deleted && (!e.data.archived || showArchived)).map((e) => categoryOf(e.data)));
-  const categories = [...muscleIds, stretchCategory].filter((id) => used.has(id as typeof stretchCategory));
-  const group = savedGroup && (categories as string[]).includes(savedGroup) ? savedGroup : "ทั้งหมด";
-  const machines = entries.filter(
-    (e) =>
-      e.kind === "machine" &&
-      !e.deleted &&
-      (!e.data.archived || showArchived) &&
-      (!gym || e.data.gym === gym) &&
-      (group === "ทั้งหมด" || categoryOf(e.data) === group) &&
-      [e.data.name, e.data.thai, ...(e.data.aliases ?? [])].join(" ")
-        .toLowerCase()
-        .includes(query.toLowerCase()),
-  );
+  const gyms = gymsFor(entries).filter((item) => !item.archived || showArchived);
+  const activeGyms = gyms.filter((item) => !item.archived);
+  const gym = savedGym === "" || gyms.some((item) => item.id === savedGym)
+    ? savedGym! : activeGyms.find((item) => item.id === "WE Fitness")?.id ?? activeGyms[0]?.id ?? noGym;
+  function setGym(value: string) {
+    try { localStorage.setItem(viewStorageKey("strength-gym"), value); } catch { /* Selection still works in memory. */ }
+    setSavedGym(value);
+    setShown(40);
+  }
+  const items = useCatalog();
+  const byId = new Map(items?.map((item) => [item.id, item]));
+  const available = entries.filter((e) => e.kind === "machine" && !e.deleted && !isPendingMachine(e));
+  const assigned = new Set(available.filter((e) => !e.data.archived || showArchived).map((e) => catalogIdOf(e.data)));
+  const categories = [...muscleIds, stretchCategory];
+  const group = savedGroup ?? "ทั้งหมด";
+  const machineCategory = (m: Machine) =>
+    m.group === "Stretch" ? stretchCategory : m.category ?? byId.get(catalogIdOf(m) ?? "")?.primary ?? categoryOf(m);
+  const visibleMachines = available.filter((e) => {
+    const m = e.data as Machine;
+    const item = byId.get(catalogIdOf(m) ?? "");
+    const inferred = catalogLinks[m.name.normalize("NFKC").trim().toLowerCase()];
+    const linkedEquipment = item?.equipment ?? (inferred?.id === catalogIdOf(m) ? inferred?.equipment : undefined);
+    return (!m.archived || showArchived) && (!gym || m.gym === gym) &&
+      (group === "ทั้งหมด" || machineCategory(m) === group) &&
+      (!equipment || equipment === (linkedEquipment ?? "other")) &&
+      matchesExercise(query, m.name, m.thai, ...(m.aliases ?? []), item?.en, item?.th, ...(item?.aliases ?? []));
+  });
+  const machines = exerciseCards(entries, visibleMachines, true);
+  const catalogCards = !gym || gym === noGym
+    ? searchCatalog(items ?? [], query, group === "ทั้งหมด" ? "" : group, equipment)
+        .filter((item) => !assigned.has(item.id))
+    : [];
+  const visibleCatalog = catalogCards.slice(0, Math.max(0, shown - machines.length));
+  const remaining = machines.length + catalogCards.length - shown;
   return (
     <>
       <Header title="Strength">
-        <button className="primary" onClick={() => setCreate(true)}>
+        {!readOnly && <button className="primary" onClick={() => setCreate(true)}>
           <Plus size={18} />
           เพิ่มเครื่อง / ท่า
-        </button>
+        </button>}
       </Header>
-      <div className="chips" role="group" aria-label="แสดง">
-        <button className={view !== "catalog" ? "selected" : ""} aria-pressed={view !== "catalog"} onClick={() => setView("mine")}>เครื่องของเรา</button>
-        <button className={view === "catalog" ? "selected" : ""} aria-pressed={view === "catalog"} onClick={() => setView("catalog")}>คลังท่าสากล</button>
-      </div>
-      {view === "catalog" ? <CatalogBrowser openMachine={setSelected} /> : <>
-      <div className="toolbar">
+      <div className="toolbar strength-filters">
         <label className="search">
           <Search size={18} />
           <input
             placeholder="ค้นหาท่า หรือชื่อเครื่อง"
             aria-label="ค้นหาเครื่อง"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => { setQuery(e.target.value); setShown(40); }}
           />
         </label>
         <select
@@ -1703,7 +1732,11 @@ function Machines() {
           onChange={(e) => setGym(e.target.value)}
         >
           <option value="">ทุกสถานที่</option>
-          {gymsFor(entries).filter((item) => !item.archived || showArchived).map((item) => <option key={item.id} value={item.id}>{item.name}{item.id === "Jett" ? " · สถิติเก่า" : ""}</option>)}
+          {gyms.map((item) => <option key={item.id} value={item.id}>{item.name}{item.id === "Jett" ? " · สถิติเก่า" : ""}</option>)}
+        </select>
+        <select aria-label="อุปกรณ์" value={equipment} onChange={(e) => { setEquipment(e.target.value); setShown(40); }}>
+          <option value="">ทุกอุปกรณ์</option>
+          {Object.entries(equipmentLabels).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
         </select>
       </div>
       <div className="chips category-chips">
@@ -1712,7 +1745,8 @@ function Machines() {
             <button
               className={group === g ? "selected" : ""}
               key={g}
-              onClick={() => setGroup(g)}
+              aria-pressed={group === g}
+              onClick={() => { setGroup(g); setShown(40); }}
             >
               {g === "ทั้งหมด" ? g : categoryLabel(g)}
             </button>
@@ -1724,20 +1758,33 @@ function Machines() {
         <input
           type="checkbox"
           checked={showArchived}
-          onChange={(e) => setShowArchived(e.target.checked)}
+          onChange={(e) => { setShowArchived(e.target.checked); setShown(40); }}
         />
         แสดงเครื่องที่เก็บเข้าคลัง
       </label>
       )}
       <div className="machine-grid">
-        {exerciseCards(entries, machines).map((e) => (
-          <MachineTile key={e.id} e={e} onClick={() => setSelected(e.id)} />
+        {machines.slice(0, shown).map((e) => (
+          <MachineTile key={e.id} e={e} category={machineCategory(e.data)} onClick={() => setSelected(e.id)} />
+        ))}
+        {visibleCatalog.map((item) => (
+          <StrengthTile key={item.id} name={item.th} thai={item.en} group={categoryLabel(item.primary)} location={noGym}
+            photo={item.images?.[0] ? <img loading="lazy" src={catalogImageUrl(item.images[0])} alt="" /> :
+              <div className="photo-empty"><Dumbbell size={36} aria-hidden="true" /></div>}
+            onClick={() => setCatalogSelection(item)}>
+            <div className="last-load"><span>{equipmentLabels[item.equipment]}</span><ArrowUpRight size={17} /></div>
+          </StrengthTile>
         ))}
       </div>
-      {!machines.length && <Empty text="ยังไม่มีเครื่องหรือท่าในหมวดนี้" action={
-        <button className="secondary" onClick={() => setView("catalog")}>ดูคลังท่าสากล</button>} />}
-      </>}
-      {selected && entries.some((e) => e.id === selected && e.kind === "machine" && !e.deleted) && (
+      {visibleCatalog.some((item) => item.images?.length) && <ImageCredit />}
+      {remaining > 0 && <button className="secondary wide" onClick={() => setShown(shown + 40)}>แสดงเพิ่ม ({remaining})</button>}
+      {!machines.length && !catalogCards.length && <Empty
+        text={gym && gym !== noGym ? "ไม่พบท่าในสถานที่นี้" :
+          items === undefined ? "กำลังเปิดรายการท่า…" : items === null ? "โหลดรายการท่าไม่สำเร็จ" : "ไม่พบท่าที่ตรงกับตัวกรอง"}
+        action={gym && query.trim() ? <button className="secondary" onClick={() => setGym("")}>ค้นหาทุกสถานที่</button> : undefined} />}
+      {catalogSelection && <CatalogDetail item={catalogSelection} close={() => setCatalogSelection(null)}
+        openMachine={(id) => { setCatalogSelection(null); setSelected(id); }} />}
+      {selected && available.some((e) => e.id === selected) && (
         <MachineDetail key={selected} id={selected} close={() => setSelected(null)} selectMachine={setSelected} />
       )}{" "}
       {create && <MachineForm close={() => setCreate(false)} />}
@@ -1852,10 +1899,11 @@ function MachineDetail({ id, close, selectMachine }: {
   return (
     <Modal title={m.name} close={close}>
       <div className="chips" aria-label="เลือกเครื่อง">
-        {machineVariants(entries, m).map((variant) => (
+        {machineVariants(entries, m, true).map((variant) => (
           <button key={variant.id} className={variant.id === id ? "selected" : ""}
             aria-pressed={variant.id === id} onClick={() => selectMachine(variant.id)}>
-            {gymName(entries, variant.data.gym)}{variant.data.label ? ` · ${variant.data.label}` : ""}
+            {gymName(entries, variant.data.gym)}{variant.data.label ? ` · ${variant.data.label}` :
+              exerciseKey(variant.data) !== exerciseKey(m) ? ` · ${variant.data.name}` : ""}
           </button>
         ))}
         <button className="edit-only" onClick={() => setAddVariant(true)}>เพิ่มเครื่องของท่านี้</button>
@@ -2034,7 +2082,7 @@ function MachineDetail({ id, close, selectMachine }: {
           )}
         </div>
           <ExerciseChart entries={entries} machines={entries.filter((item) =>
-            item.kind === "machine" && !item.deleted && exerciseKey(item.data) === exerciseKey(m)
+            item.kind === "machine" && !item.deleted && !isPendingMachine(item) && exerciseKey(item.data) === exerciseKey(m)
           )} />
         <div className="upload-row edit-only">
           <button className="secondary" onClick={() => setEdit(true)}>
@@ -2158,7 +2206,7 @@ function MachineForm({
     setMuscles({ primary, secondary });
   };
   const suggestions = entry ? [] : exerciseCards(entries, entries.filter((e) =>
-    e.kind === "machine" && !e.deleted &&
+    e.kind === "machine" && !e.deleted && !isPendingMachine(e) &&
     [e.data.name, e.data.thai, ...(e.data.aliases ?? [])].some((alias) => alias && similarExerciseName(name, alias)),
   )).slice(0, 5);
   return (
@@ -2331,7 +2379,7 @@ function StartSession({
     [create, setCreate] = useState(false),
     [date, setDate] = useState(today());
   const allMachines = entries.filter(
-      (e) => e.kind === "machine" && !e.deleted && !e.data.archived,
+      (e) => e.kind === "machine" && !e.deleted && !e.data.archived && !isPendingMachine(e),
     );
   const gyms = gymsFor(entries).filter((gym) => !gym.archived);
   const [gym, setGym] = useState(() => {
@@ -3991,6 +4039,51 @@ function ReviewedSessionMigration() {
   );
 }
 
+function PendingMachines() {
+  const { entries } = useData();
+  const pending = entries.filter((entry) => !entry.deleted && isPendingMachine(entry))
+    .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+  return pending.length > 0 && (
+    <section className="panel">
+      <h2>เครื่อง Jett ที่รอตอบ</h2>
+      <div className="machine-grid">
+        {pending.map((entry) => <PendingMachineQuestion key={entry.id} entry={entry} />)}
+      </div>
+    </section>
+  );
+}
+
+function PendingMachineQuestion({ entry }: { entry: Entry }) {
+  const { entries, run } = useData();
+  const [open, setOpen] = useState(false);
+  const [answer, setAnswer] = useState("");
+  const items = useCatalog(open);
+  return (
+    <article className="panel pending-machine">
+      <div className="machine-photo"><MachineCover entry={entry} entries={entries} /></div>
+      <h3>{entry.data.name}</h3>
+      {!open ? <button className="secondary" onClick={() => setOpen(true)}>เลือกท่าจากรายการ</button> :
+        <form className="form" onSubmit={(event) => {
+          event.preventDefault();
+          if (!items?.some((item) => item.id === answer && !item.archived)) return;
+          void run(async () => {
+            const current = (await allEntries()).find((item) => item.id === entry.id);
+            if (current && !current.deleted && isPendingMachine(current)) {
+              await save("machine", { ...current.data, catalogId: answer }, current.id);
+            }
+          }, "บันทึกคำตอบแล้ว");
+        }}>
+          <select aria-label={`เลือกท่าสำหรับ ${entry.data.name}`} value={answer} onChange={(event) => setAnswer(event.target.value)}>
+            <option value="">{items === null ? "โหลดรายการท่าไม่สำเร็จ" : items ? "เลือกท่า" : "กำลังโหลดรายการท่า…"}</option>
+            {items?.filter((item) => !item.archived).map((item) =>
+              <option key={item.id} value={item.id}>{item.en} · {item.th}</option>)}
+          </select>
+          <button className="primary" disabled={!answer}>ยืนยันคำตอบ</button>
+        </form>}
+    </article>
+  );
+}
+
 function SettingsPage({
   synchronize,
   busy,
@@ -4079,6 +4172,7 @@ function SettingsPage({
       {profile && profile.role !== "trainer" && <MyCoaches />}
       {profile?.role === "owner" && <SignupSettings />}
       {profile?.role === "owner" && <TrainerAccounts />}
+      {showOwnerSettings && <PendingMachines />}
       {!profile && user && (
         <section className="panel account-panel">
           <div className="upload-row">

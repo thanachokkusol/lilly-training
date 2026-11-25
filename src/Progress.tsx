@@ -16,6 +16,7 @@ import TrainingCalendar from "./TrainingCalendar";
 import TrainingStats from "./TrainingStats";
 import BodyProfile from "./BodyProfile";
 import { isStretch } from "./stretchTraining";
+import { isPendingMachine } from "./pendingMachines";
 import { BodyMetricChart, BodyMetricDialog, type BodyMetricDetail } from "./BodyMetricChart";
 import { archivedInBody, assessBmi, assessWaist, bmiReference, bodyMetrics, bodyMetricSeries, sizingId, waistReference } from "./bodyDetails";
 import {
@@ -25,7 +26,6 @@ import {
   dateLabel,
   cardioTotals,
   minuteDuration,
-  latestExercise,
   exerciseKey,
 } from "./core";
 import { useData, Header, BodyForm, useRememberedView } from "./App";
@@ -46,7 +46,7 @@ export default function Progress() {
       .filter((e) => e.kind === "body")
       .sort((a, b) => a.data.date.localeCompare(b.data.date)),
     machines = active
-      .filter((e) => e.kind === "machine" && !isStretch(e.id))
+      .filter((e) => e.kind === "machine" && !isStretch(e.id) && !isPendingMachine(e))
       .sort(
         (a, b) =>
           Number(b.data.gym === "WE Fitness") -
@@ -54,7 +54,6 @@ export default function Progress() {
           a.data.name.localeCompare(b.data.name),
       ),
     exercises = Array.from(new Map(machines
-      .filter((m) => !m.data.name.includes("รอยืนยันชื่อ") || latestExercise(active, m.id, today()))
       .map((m) => [exerciseKey(m.data), m])).entries()),
     chosen = exercises.some(([key]) => key === machine) ? machine : exercises[0]?.[0];
   const reports = archivedInBody(entries);

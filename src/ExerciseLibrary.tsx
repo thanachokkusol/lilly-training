@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { ChevronRight, Dumbbell, Plus, Search } from "lucide-react";
-import { Empty, Modal, useData } from "./App";
+import { ChevronRight, Dumbbell, Plus } from "lucide-react";
+import { Modal, useData } from "./App";
 import BodyMap from "./BodyMap";
 import { allEntries, save } from "./db";
 import { catalogMachineId, equipmentLabels, loadCatalog, machineFromCatalog, machinesOf, noGym, recordLabels, searchCatalog, type CatalogItem } from "./catalog";
 import { gymName, gymsFor } from "./gyms";
-import { categoryLabel, muscleIds, muscleLabels, muscleText } from "./muscles";
+import { categoryLabel, muscleLabels, muscleText } from "./muscles";
 import type { Entry } from "./types";
 
 /** undefined while loading, null when it could not be read. */
@@ -25,7 +25,7 @@ export async function ensureCatalogMachine(item: CatalogItem, gym: string): Prom
   return existing ?? save("machine", machineFromCatalog(item, gym), catalogMachineId(item.id, gym));
 }
 const subtitle = (item: CatalogItem) => `${categoryLabel(item.primary)} · ${equipmentLabels[item.equipment]}`;
-const imageUrl = (file: string) => `${import.meta.env.BASE_URL}catalog/${file}`;
+export const catalogImageUrl = (file: string) => `${import.meta.env.BASE_URL}catalog/${file}`;
 
 export function ImageCredit() {
   return (
@@ -40,7 +40,7 @@ function Steps({ item, images }: { item: CatalogItem; images: boolean }) {
     <>
       {images && item.images && (
         <figure className="catalog-images">
-          {item.images.map((file) => <img key={file} loading="lazy" src={imageUrl(file)} alt={`${item.th} ภาพประกอบ`} />)}
+          {item.images.map((file) => <img key={file} loading="lazy" src={catalogImageUrl(file)} alt={`${item.th} ภาพประกอบ`} />)}
           <figcaption><ImageCredit /></figcaption>
         </figure>
       )}
@@ -121,7 +121,7 @@ function CatalogRow({ item, entries, onClick, add }: { item: CatalogItem; entrie
   const places = [...new Set(machinesOf(entries, item.id).map((e) => gymName(entries, e.data.gym)))];
   return (
     <button type="button" className="catalog-row" onClick={onClick}>
-      {item.images ? <img loading="lazy" src={imageUrl(item.images[0])} alt="" /> : <span className="catalog-icon"><Dumbbell size={20} aria-hidden="true" /></span>}
+      {item.images ? <img loading="lazy" src={catalogImageUrl(item.images[0])} alt="" /> : <span className="catalog-icon"><Dumbbell size={20} aria-hidden="true" /></span>}
       <span>
         <strong>{item.th}</strong>
         <small>{item.en}</small>
@@ -129,42 +129,6 @@ function CatalogRow({ item, entries, onClick, add }: { item: CatalogItem; entrie
       </span>
       {add ? <Plus size={17} /> : <ChevronRight size={17} />}
     </button>
-  );
-}
-export function CatalogBrowser({ openMachine }: { openMachine: (id: string) => void }) {
-  const { entries } = useData();
-  const items = useCatalog();
-  const [query, setQuery] = useState(""), [muscle, setMuscle] = useState(""), [equipment, setEquipment] = useState("");
-  const [shown, setShown] = useState(40), [selected, setSelected] = useState<CatalogItem | null>(null);
-  if (items === null) return <Empty text="เปิดคลังท่าไม่สำเร็จ เชื่อมต่ออินเทอร์เน็ตแล้วเปิดหน้านี้ใหม่" />;
-  if (!items) return <Empty text="กำลังเปิดคลังท่า…" />;
-  const found = searchCatalog(items, query, muscle, equipment);
-  const change = (set: (value: string) => void) => (value: string) => { set(value); setShown(40); };
-  return (
-    <section className="catalog">
-      <div className="toolbar">
-        <label className="search">
-          <Search size={18} />
-          <input aria-label="ค้นหาในคลังท่า" placeholder="ค้นหาชื่อไทยหรืออังกฤษ" value={query} onChange={(e) => change(setQuery)(e.target.value)} />
-        </label>
-        <select aria-label="กล้ามเนื้อ" value={muscle} onChange={(e) => change(setMuscle)(e.target.value)}>
-          <option value="">ทุกกล้ามเนื้อ</option>
-          {muscleIds.map((id) => <option key={id} value={id}>{muscleLabels[id]}</option>)}
-        </select>
-        <select aria-label="อุปกรณ์" value={equipment} onChange={(e) => change(setEquipment)(e.target.value)}>
-          <option value="">ทุกอุปกรณ์</option>
-          {Object.entries(equipmentLabels).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
-        </select>
-      </div>
-      <p className="muted" role="status">{found.length} ท่า</p>
-      <div className="catalog-list">
-        {found.slice(0, shown).map((item) => <CatalogRow key={item.id} item={item} entries={entries} onClick={() => setSelected(item)} />)}
-      </div>
-      {!found.length && <Empty text="ไม่พบท่าที่ค้นหา ลองคำอื่นหรือล้างตัวกรอง" />}
-      {found.length > shown && <button className="secondary wide" onClick={() => setShown(shown + 40)}>แสดงเพิ่ม ({found.length - shown})</button>}
-      {found.slice(0, shown).some((item) => item.images) && <ImageCredit />}
-      {selected && <CatalogDetail item={selected} close={() => setSelected(null)} openMachine={(id) => { setSelected(null); openMachine(id); }} />}
-    </section>
   );
 }
 /** Search results from the library inside a picker; choosing one adds it to the gym of that workout. */

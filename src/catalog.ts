@@ -4,6 +4,7 @@ import type { Entry, LoadMode, Machine, RecordMode } from "./types";
 
 export type CatalogItem = {
   id: string; en: string; th: string; equipment: string; detail?: string; primary: Muscle; secondary: Muscle[];
+  aliases?: string[];
   record: "weight_reps" | "reps" | "time" | "added" | "assisted" | "distance" | "distance_time";
   steps: string[]; caution?: string; note?: string; images?: string[]; archived?: boolean;
 };
@@ -44,8 +45,11 @@ export function machineFromCatalog(item: CatalogItem, gym: string): Machine {
 }
 export const machinesOf = (entries: Entry[], catalogId: string) => entries.filter((e) =>
   e.kind === "machine" && !e.deleted && !e.data.archived && catalogIdOf(e.data) === catalogId);
+export function matchesExercise(query: string, ...names: (string | undefined)[]) {
+  const text = names.join(" ").normalize("NFKC").toLowerCase();
+  return query.normalize("NFKC").toLowerCase().split(/\s+/).filter(Boolean).every((word) => text.includes(word));
+}
 export function searchCatalog(items: CatalogItem[], query: string, muscle = "", equipment = "") {
-  const words = query.normalize("NFKC").toLowerCase().split(/\s+/).filter(Boolean);
   return items.filter((item) => !item.archived && (!muscle || item.primary === muscle) && (!equipment || item.equipment === equipment) &&
-    words.every((word) => `${item.th} ${item.en} ${categoryLabel(item.primary)}`.toLowerCase().includes(word)));
+    matchesExercise(query, item.th, item.en, categoryLabel(item.primary), ...(item.aliases ?? [])));
 }

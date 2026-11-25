@@ -3480,6 +3480,35 @@ button.set-previous:disabled {
 .category-chips button {
   flex: 0 0 auto;
 }
+.strength-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+.strength-filters .search {
+  grid-column: 1 / -1;
+  max-width: none;
+  min-width: 0;
+}
+.strength-filters select,
+.pending-machine select {
+  min-width: 0;
+  width: 100%;
+}
+.pending-machine {
+  min-width: 0;
+}
+.pending-machine .machine-photo {
+  border-radius: 12px;
+  overflow: hidden;
+}
+@media (min-width: 650px) {
+  .strength-filters {
+    grid-template-columns: minmax(0, 1fr) minmax(0, auto) minmax(0, auto);
+  }
+  .strength-filters .search {
+    grid-column: auto;
+  }
+}
 .catalog-list {
   display: grid;
   gap: 8px;
