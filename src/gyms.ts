@@ -1,3 +1,4 @@
+import { noGym } from "./catalog";
 import type { Entry } from "./types";
 
 export type Gym = { id: string; name: string; shortCode: string; archived: boolean; removed?: boolean };
@@ -19,7 +20,9 @@ export function gymsFor(entries: Entry[]): Gym[] {
     if (typeof id === "string" && id && !gyms.has(id))
       gyms.set(id, { id, name: id, shortCode: "", archived: false });
   }
-  return [...gyms.values()].filter((gym) => !gym.removed);
+  // Exercises without a gym come last and cannot be renamed or removed.
+  gyms.delete(noGym);
+  return [...[...gyms.values()].filter((gym) => !gym.removed), { id: noGym, name: noGym, shortCode: "", archived: false }];
 }
 /** A gym can be removed once nothing in use or in any workout belongs to it. */
 export function gymInUse(entries: Entry[], id: string) {

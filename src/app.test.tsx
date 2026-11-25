@@ -237,6 +237,62 @@ it("explains a stretch before starting, lets the person set it, press each repet
     expect(session.data.exercises[0].sets.map((set: any) => [set.reps, set.holdSeconds])).toEqual([[2, 15]]);
   });
 });
+it("adds how-to to a machine we already have without touching its name, notes, photo or records", async () => {
+  const machine = { name: "Chest Press", thai: "เครื่องดันอก", gym: "WE Fitness", group: "อก", setup: "เบาะระดับ 6", cues: "ดันช้า ๆ", loadMode: "per-side", photoId: "photo-own" };
+  await save("photo", { label: "own", mime: "image/jpeg", machineId: "we-chest" }, "photo-own");
+  await save("machine", machine, "we-chest");
+  await save("session", { date: "2026-01-10", title: "Old", status: "completed", note: "", exercises: [
+    { machineId: "we-chest", loadMode: "per-side", setup: "", note: "", sets: [{ id: "a", load: 25, enteredAs: "perSide", reps: 12, warmup: false, done: true }] }] }, "old");
+  location.hash = "#machines";
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Chest Press/ }));
+  const dialog = await topDialog();
+  expect(await dialog.findByText(/^วิธีทำละเอียด/)).toBeTruthy();
+  expect(dialog.getByText("ดันช้า ๆ")).toBeTruthy();
+  expect(dialog.getByText("เบาะระดับ 6")).toBeTruthy();
+  expect(dialog.getAllByText(/25 กก\. \(ข้างละ 12\.5\) × 12 ครั้ง/).length).toBeGreaterThan(0);
+  // Saving the form unchanged keeps the record as it was.
+  fireEvent.click(dialog.getByRole("button", { name: "แก้ไขรายละเอียด" }));
+  const form = await topDialog();
+  expect((await form.findByLabelText(/ท่าในคลังสากล/) as HTMLInputElement).value).toContain("Chest Press (Machine)");
+  fireEvent.click(form.getByRole("button", { name: "บันทึกเครื่อง" }));
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "แก้ไขเครื่อง" })).toBeNull());
+  const stored = JSON.parse(JSON.stringify((await allEntries()).find((e) => e.id === "we-chest")!.data));
+  expect(stored).toEqual({ ...machine, label: "", exerciseId: "chest press" });
+}, 20000);
+it("adds a library exercise once without a gym and records it by time", async () => {
+  location.hash = "#machines";
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "คลังท่าสากล" }));
+  expect(await screen.findByText("427 ท่า")).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("ค้นหาในคลังท่า"), { target: { value: "side plank" } });
+  const open = async () => {
+    fireEvent.click(await screen.findByRole("button", { name: /Side Plank/ }));
+    return topDialog();
+  };
+  let dialog = await open();
+  expect(dialog.getAllByRole("listitem").length).toBeGreaterThanOrEqual(6);
+  fireEvent.click(dialog.getByRole("button", { name: "เพิ่มท่านี้" }));
+  await screen.findByRole("button", { name: /เริ่มฝึกท่านี้/ });
+  fireEvent.click((await topDialog()).getByRole("button", { name: "ปิด" }));
+  dialog = await open();
+  fireEvent.click(dialog.getByRole("button", { name: "เปิดเครื่องนี้" }));
+  const machines = (await allEntries()).filter((e) => e.kind === "machine" && e.data.catalogId && !e.deleted);
+  expect(machines.map((e) => [e.data.name, e.data.gym, e.data.record, e.data.category])).toEqual([["Side Plank", "ไม่ระบุยิม", "time", "abdominals"]]);
+  fireEvent.click((await topDialog()).getByRole("button", { name: /เริ่มฝึกท่านี้/ }));
+  const seconds = await screen.findByRole("spinbutton", { name: "เซต 1 เวลา (วินาที)" });
+  fireEvent.click(screen.getByRole("button", { name: "ยืนยันเซต 1" }));
+  expect(await screen.findByText("กรอกเวลาหรือระยะให้ครบก่อนยืนยัน")).toBeTruthy();
+  fireEvent.change(seconds, { target: { value: "45" } });
+  fireEvent.click(screen.getByRole("button", { name: "ยืนยันเซต 1" }));
+  fireEvent.click(screen.getByRole("button", { name: "กลับรายการ" }));
+  fireEvent.click(await screen.findByRole("button", { name: "จบการฝึก" }));
+  await waitFor(async () => {
+    const session = (await allEntries()).find((e) => e.kind === "session")!.data;
+    expect([session.status, session.gym]).toEqual(["completed", "ไม่ระบุยิม"]);
+    expect(session.exercises[0]).toMatchObject({ record: "time", loadMode: "bodyweight", sets: [{ holdSeconds: 45, timed: true, reps: 1, done: true }] });
+  });
+}, 20000);
 it("removes an unused gym from every list but never one with history", async () => {
   const machine = { name: "Old Press", thai: "", group: "อก", setup: "", cues: "", loadMode: "total" };
   await save("machine", { ...machine, gym: "อื่น ๆ", archived: true }, "old-other");

@@ -32,10 +32,21 @@ export interface Machine {
   photoId?: string;
   referencePhotoId?: string;
   archived?: boolean;
-  /** Set only when someone corrects the muscles worked out from the name. */
+  /** Corrections saved by older versions; `trains` replaces it. */
   muscles?: { primary: string[]; secondary: string[] };
+  trains?: { primary: string[]; secondary: string[] };
+  /** Main muscle chosen by a person, from the universal list. */
+  category?: string;
+  /** Universal exercise; an empty string means deliberately none. */
+  catalogId?: string;
+  record?: RecordMode;
 }
+/** How a set is recorded when it is not weight × repetitions. */
+export type RecordMode = "time" | "added" | "distance" | "distance_time";
 export interface SetLog {
+  /** A whole set measured by time (`holdSeconds`), unlike a stretch hold repeated several times. */
+  timed?: boolean;
+  meters?: number;
   type?: "drop" | "failure";
   /** Effort from 1 to 10, recorded only when the lifter wants it. */
   rpe?: number;
@@ -61,6 +72,7 @@ export interface ExerciseLog {
   /** Exercises with the same number are done back to back. */
   superset?: number;
   restSeconds?: number;
+  record?: RecordMode;
   target?: ExerciseTarget;
   originalName?: string;
   reportedOnly?: boolean;

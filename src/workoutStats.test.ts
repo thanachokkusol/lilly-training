@@ -82,22 +82,25 @@ describe("muscles", () => {
     expect(homeMoves.filter((move) => !musclesFor(move).primary.length).map(({ name }) => name)).toEqual([]);
   });
   it.each([
-    ["Chest Press", "อก", ["chest"]], ["Triceps Pushdown", "แขน", ["triceps"]], ["Seated Cable Row", "หลัง", ["upper-back"]],
-    ["Close-Grip Lat Pulldown", "หลัง", ["upper-back"]], ["Rear Delt Fly", "ไหล่", ["deltoids"]], ["Leg Press", "ขา", ["quadriceps", "gluteal"]],
-    ["Hip Abduction", "ขา", ["gluteal"]], ["Leg Extension / Leg Curl", "ขา", ["quadriceps", "hamstring"]],
+    ["Chest Press", "อก", ["chest"]], ["Triceps Pushdown", "แขน", ["triceps"]], ["Seated Cable Row", "หลัง", ["upper_back"]],
+    ["Close-Grip Lat Pulldown", "หลัง", ["lats"]], ["Rear Delt Fly", "ไหล่", ["shoulders"]], ["Leg Press", "ขา", ["quadriceps"]],
+    ["Hip Abduction", "ขา", ["abductors"]], ["Leg Extension / Leg Curl", "ขา", ["quadriceps", "hamstrings"]],
     ["Doorway Chest Stretch", "Stretch", []], ["เครื่องถีบขาหลัง", "ขา", []], ["Incline Press", "อก", ["chest"]],
-    ["T-Bar Row (Chest-Supported)", "หลัง", ["upper-back"]], ["Hammer Curl", "แขน", ["biceps", "forearm"]],
+    ["T-Bar Row (Chest-Supported)", "หลัง", ["upper_back"]], ["Hammer Curl", "แขน", ["biceps"]],
   ])("maps %s", (name, group, primary) => {
     expect(musclesFor({ name, group }).primary).toEqual(primary);
   });
   it("prefers the muscles the owner picked", () => {
-    expect(musclesFor({ name: "Chest Press", group: "อก", muscles: { primary: ["triceps"], secondary: [] } }).primary).toEqual(["triceps"]);
+    expect(musclesFor({ name: "Chest Press", group: "อก", trains: { primary: ["triceps"], secondary: [] } }).primary).toEqual(["triceps"]);
+    // Corrections saved before the universal list still count.
+    expect(musclesFor({ name: "Chest Press", group: "อก", muscles: { primary: ["deltoids"], secondary: ["gluteal", "abs", "obliques"] } }))
+      .toEqual({ primary: ["shoulders"], secondary: ["glutes", "abdominals"] });
   });
   it("adds a full set to main muscles, half to helping muscles, and reports unknown ones", () => {
     const entries = [machine("press", "Chest Press", "อก"), machine("x", "เครื่องใหม่", "ขา")];
     const { sets, unknown } = muscleSets(entries, [session("a", "2026-11-20", [
       exercise("press", [set(20, 10), set(20, 10)]), exercise("x", [set(20, 10)])]).data]);
-    expect(sets).toEqual({ chest: 2, triceps: 1, deltoids: 1 });
+    expect(sets).toEqual({ chest: 2, triceps: 1, shoulders: 1 });
     expect(unknown).toBe(1);
   });
 });

@@ -1,4 +1,4 @@
-import { muscleLabels } from "./muscles";
+import { isMuscle } from "./muscles";
 import type { Entry } from "./types";
 import { reportUrl, sizingFields, sizingId, sizingTextFields } from "./bodyDetails";
 const kinds = [
@@ -24,8 +24,9 @@ const validTarget = (t: any) =>
   !!t && typeof t === "object" && Number.isInteger(t.sets) && t.sets >= 1 && t.sets <= 20 &&
   Number.isInteger(t.reps) && t.reps >= 1 && t.reps <= 1000 &&
   (t.note === undefined || (typeof t.note === "string" && t.note.length <= 500)) && validRest(t.rest);
-const validMuscles = (list: any) => Array.isArray(list) && list.length <= 15 &&
-  list.every((muscle) => typeof muscle === "string" && muscle in muscleLabels);
+const validMuscles = (list: any, strict = false) => Array.isArray(list) && list.length <= 20 &&
+  list.every((muscle) => strict ? isMuscle(muscle) : typeof muscle === "string" && muscle.length <= 30);
+const recordModes = ["time", "added", "distance", "distance_time"];
 export function validateEntry(e: Pick<Entry, "id" | "kind" | "data">) {
   if (
     typeof e.id !== "string" ||
@@ -82,7 +83,11 @@ export function validateEntry(e: Pick<Entry, "id" | "kind" | "data">) {
       typeof d.gym !== "string" ||
       typeof d.setup !== "string" ||
       !["total", "per-side", "assistance", "bodyweight"].includes(d.loadMode) ||
-      (d.muscles !== undefined && (!d.muscles || !validMuscles(d.muscles.primary) || !validMuscles(d.muscles.secondary)))
+      (d.muscles !== undefined && (!d.muscles || !validMuscles(d.muscles.primary) || !validMuscles(d.muscles.secondary))) ||
+      (d.trains !== undefined && (!d.trains || !validMuscles(d.trains.primary, true) || !validMuscles(d.trains.secondary, true))) ||
+      (d.category !== undefined && !isMuscle(d.category)) ||
+      (d.catalogId !== undefined && (typeof d.catalogId !== "string" || d.catalogId.length > 60)) ||
+      (d.record !== undefined && !recordModes.includes(d.record))
     )
       throw Error("รายละเอียดเครื่องไม่ถูกต้อง");
   }
@@ -109,6 +114,7 @@ export function validateEntry(e: Pick<Entry, "id" | "kind" | "data">) {
       if (x?.target !== undefined && !validTarget(x.target)) throw Error("เป้าเซตไม่ถูกต้อง");
       if (x && (!validRest(x.restSeconds) || (x.superset !== undefined && (!Number.isInteger(x.superset) || x.superset < 1 || x.superset > 100))))
         throw Error("เวลาพักหรือซูเปอร์เซตไม่ถูกต้อง");
+      if (x?.record !== undefined && !recordModes.includes(x.record)) throw Error("วิธีบันทึกผลไม่ถูกต้อง");
       const text = (v: unknown, max = 5000) =>
         v == null || (typeof v === "string" && v.length <= max);
       if (
@@ -126,11 +132,13 @@ export function validateEntry(e: Pick<Entry, "id" | "kind" | "data">) {
             typeof s !== "object" ||
             !num(s.load) ||
             !num(s.reps, 10000) ||
-            (s.holdSeconds != null && (!Number.isInteger(s.holdSeconds) || s.holdSeconds < 1 || s.holdSeconds > 600 ||
+            (s.holdSeconds != null && (!Number.isInteger(s.holdSeconds) || s.holdSeconds < 1 || s.holdSeconds > 14400 ||
               x.loadMode !== "bodyweight" || s.load !== null)) ||
             (s.reps !== null && !Number.isInteger(s.reps)) ||
             !text(s.loadText, 200) ||
             (s.warmup != null && typeof s.warmup !== "boolean") ||
+            (s.meters !== undefined && !(typeof s.meters === "number" && s.meters > 0 && s.meters <= 100000)) ||
+            (s.timed !== undefined && typeof s.timed !== "boolean") ||
             (s.type !== undefined && !["drop", "failure"].includes(s.type)) ||
             (s.rpe !== undefined && !(typeof s.rpe === "number" && s.rpe >= 1 && s.rpe <= 10)) ||
             typeof s.done !== "boolean",

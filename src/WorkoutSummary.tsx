@@ -83,6 +83,7 @@ export function MachineInsights({ id, machine, entries }: { id: string; machine:
   const rows = ([
     ["น้ำหนักมากสุด", records.weight, "กก."], ["1RM โดยประมาณ", records.max, "กก."], ["ปริมาณต่อเซต", records.volume, "กก."],
     ["ปริมาณต่อครั้งฝึก", records.session, "กก."], ["จำนวนครั้งมากสุด", records.reps, "ครั้ง"],
+    ["เวลานานสุด", records.time, "วินาที"], ["ระยะไกลสุด", records.distance, "ม."], ["น้ำหนักเพิ่มมากสุด", records.added, "กก."],
   ] as const).flatMap(([label, best, unit]) => best ? [{ label, best, unit }] : []);
   return (
     <>
@@ -94,7 +95,7 @@ export function MachineInsights({ id, machine, entries }: { id: string; machine:
             <div>
               {primary.length > 0 && <p><strong>เน้น:</strong> {muscleText(primary)}</p>}
               {secondary.length > 0 && <p><strong>ช่วย:</strong> {muscleText(secondary)}</p>}
-              {primary.map((m) => <p className="muted" key={m}>{muscleBenefits[m]}</p>)}
+              {primary.filter((m) => muscleBenefits[m]).map((m) => <p className="muted" key={m}>{muscleBenefits[m]}</p>)}
             </div>
           </div>
         ) : <p className="muted">ยังไม่ระบุ เลือกกล้ามเนื้อได้ที่ “แก้ไขรายละเอียด”</p>}

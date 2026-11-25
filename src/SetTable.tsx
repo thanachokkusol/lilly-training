@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Check } from "lucide-react";
-import { loadLabel, totalLoad } from "./core";
+import { loadLabel, secondsText, totalLoad } from "./core";
 import type { ExerciseLog, SetLog } from "./types";
 
 const typeOf = (set: SetLog) => set.warmup ? "warmup" : set.type ?? "normal";
@@ -31,13 +31,21 @@ export default function SetTable({ x, previous, prefix = "", unit: inputMode, sh
     const place = x.sets.slice(0, index).filter((set) => set.warmup === warmup).length;
     return before.filter((set) => !!set.warmup === warmup)[place];
   };
+  const byTime = x.record === "time" || x.record === "distance_time";
+  const firstHead = textLoad ? "น้ำหนัก (ข้อความ)" : x.record === "time" ? "" : x.record === "distance_time" ? "เมตร" : x.record === "added" ? "กก. เพิ่ม" : unit;
+  const secondHead = byTime ? "วินาที" : x.record === "distance" ? "เมตร" : "ครั้ง";
   const previousText = (set: SetLog) => {
+    if (set.timed || set.meters != null) return [set.meters != null && `${set.meters} ม.`, set.timed && secondsText(set.holdSeconds ?? 0)].filter(Boolean).join(" ");
+    if (x.loadMode === "bodyweight" && set.load) return `+${set.load}×${set.reps ?? "–"}`;
     if (x.loadMode === "bodyweight") return `${set.reps ?? "–"} ครั้ง`;
     const load = set.load === null ? set.loadText?.trim() : totalLoad(set, previous!.loadMode)! / divisor;
     return `${load ?? "–"}×${set.reps ?? "–"}`;
   };
   const copy = (index: number, set: SetLog) => patch(index, {
     reps: set.reps,
+    ...(set.timed && { timed: true, holdSeconds: set.holdSeconds }),
+    ...(set.meters != null && { meters: set.meters }),
+    ...(x.record === "added" && { load: set.load }),
     ...(x.loadMode !== "bodyweight" && set.load !== null && {
       load: totalLoad(set, previous!.loadMode),
       enteredAs: configurable ? inputMode : undefined,
@@ -48,8 +56,8 @@ export default function SetTable({ x, previous, prefix = "", unit: inputMode, sh
       <div className="set-head">
         <span>เซต</span>
         <span>ครั้งก่อน</span>
-        <span>{textLoad ? "น้ำหนัก (ข้อความ)" : unit}</span>
-        <span>ครั้ง</span>
+        <span>{firstHead}</span>
+        <span>{secondHead}</span>
         {showRpe && <span>RPE</span>}
         <span>เสร็จ</span>
       </div>
@@ -72,19 +80,33 @@ export default function SetTable({ x, previous, prefix = "", unit: inputMode, sh
               {textLoad ? (
                 <input aria-label={`${label} น้ำหนักแบบข้อความ`} value={a.loadText ?? ""} placeholder="เช่น 13.5 กก. + 10 ที่หมุน"
                   onChange={(e) => patch(j, { loadText: e.target.value })} />
+              ) : x.record === "time" ? <span /> : x.record === "distance_time" ? (
+                <input aria-label={`${label} ระยะ (เมตร)`} type="number" inputMode="decimal" min="0" step="1" placeholder="–" value={a.meters ?? ""}
+                  onChange={(e) => patch(j, { meters: Number(e.target.value) > 0 ? Number(e.target.value) : undefined })} />
               ) : (
                 <input aria-label={`${label} น้ำหนัก`} type="number" inputMode="decimal" min="0" step="0.1"
-                  placeholder={x.loadMode === "bodyweight" ? "ตัว" : "–"}
+                  placeholder={x.record === "added" ? "+0" : x.loadMode === "bodyweight" ? "ตัว" : "–"}
                   value={a.load === null ? "" : totalLoad(a, x.loadMode)! / divisor}
-                  disabled={x.loadMode === "bodyweight"}
+                  disabled={x.loadMode === "bodyweight" && x.record !== "added"}
                   onChange={(e) => patch(j, {
                     load: e.target.value === "" ? null : Number(e.target.value) * divisor,
                     enteredAs: configurable ? inputMode : undefined,
                   })} />
               )}
-              <input aria-label={`${label} จำนวนครั้ง`} type="number" inputMode="numeric" min="1" step="1" placeholder="–"
-                value={a.reps ?? ""}
-                onChange={(e) => patch(j, { reps: e.target.value === "" ? null : Number(e.target.value) })} />
+              {byTime ? (
+                <input aria-label={`${label} เวลา (วินาที)`} type="number" inputMode="numeric" min="1" step="1" placeholder="–" value={a.holdSeconds ?? ""}
+                  onChange={(e) => {
+                    const seconds = Math.round(Number(e.target.value));
+                    patch(j, seconds > 0 ? { holdSeconds: seconds, timed: true, reps: 1 } : { holdSeconds: undefined, timed: undefined, reps: null });
+                  }} />
+              ) : x.record === "distance" ? (
+                <input aria-label={`${label} ระยะ (เมตร)`} type="number" inputMode="decimal" min="0" step="1" placeholder="–" value={a.meters ?? ""}
+                  onChange={(e) => patch(j, Number(e.target.value) > 0 ? { meters: Number(e.target.value), reps: 1 } : { meters: undefined, reps: null })} />
+              ) : (
+                <input aria-label={`${label} จำนวนครั้ง`} type="number" inputMode="numeric" min="1" step="1" placeholder="–"
+                  value={a.reps ?? ""}
+                  onChange={(e) => patch(j, { reps: e.target.value === "" ? null : Number(e.target.value) })} />
+              )}
               {showRpe && (
                 <select aria-label={`${label} RPE`} value={a.rpe ?? ""}
                   onChange={(e) => patch(j, { rpe: e.target.value ? Number(e.target.value) : undefined })}>

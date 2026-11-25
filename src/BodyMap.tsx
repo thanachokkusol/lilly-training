@@ -1,6 +1,13 @@
 import { useEffect, useState } from "react";
 import { muscleLabels, type Muscle } from "./muscles";
 
+/** Parts of the drawing and the muscles they stand for. */
+const parts: Record<string, Muscle[]> = {
+  chest: ["chest"], deltoids: ["shoulders"], triceps: ["triceps"], biceps: ["biceps"], forearm: ["forearms"], trapezius: ["traps"],
+  "upper-back": ["upper_back", "lats"], "lower-back": ["lower_back"], neck: ["neck"], abs: ["abdominals"], obliques: ["abdominals"],
+  gluteal: ["glutes", "abductors"], quadriceps: ["quadriceps"], hamstring: ["hamstrings"], calves: ["calves"], adductors: ["adductors"],
+};
+
 // The outline is drawn only where it is shown, so it stays out of the first download.
 type Paths = typeof import("./bodyPaths").bodyPaths;
 let loaded: Paths | undefined;
@@ -19,8 +26,8 @@ export default function BodyMap({ sets }: { sets: Partial<Record<Muscle, number>
   }, []);
   const max = Math.max(0, ...Object.values(sets));
   const fill = (slug: string) => {
-    const value = sets[slug as Muscle];
-    if (!value || !max) return slug === "hair" ? "#5c665c" : slug in muscleLabels ? "#dde1d5" : "#e8eae2";
+    const value = Math.max(0, ...(parts[slug] ?? []).map((muscle) => sets[muscle] ?? 0), slug in parts ? sets.full_body ?? 0 : 0);
+    if (!value || !max) return slug === "hair" ? "#5c665c" : slug in parts ? "#dde1d5" : "#e8eae2";
     return shades[Math.min(shades.length - 1, Math.ceil((value / max) * shades.length) - 1)];
   };
   const label = Object.entries(sets).filter(([, value]) => value)

@@ -4,6 +4,7 @@ import { validateEntry } from "./validation";
 import { exerciseKey, octoberWalkWeek, today } from "./core";
 import { planSessionMove, type MachineMove } from "./migration";
 import { exerciseGuideFrames, homeCoachRoutine, homeLegsRoutine, homeGym, homeMoves, isObsoleteHomeRoutine } from "./homeTraining";
+import { noGym } from "./catalog";
 import { gymCatalogId, gymInUse, gymsFor, type Gym } from "./gyms";
 import { chestStretchRoutine, stretchMoves } from "./stretchTraining";
 const loadZip = () => import("jszip").then((m) => m.default);
@@ -123,13 +124,13 @@ export async function removeGym(id: string) {
   const tx = (await db).transaction("entries", "readwrite");
   const entries = await tx.store.getAll() as Entry[];
   const gym = gymsFor(entries).find((item) => item.id === id);
-  if (!gym || gymInUse(entries, id)) {
+  if (!gym || id === noGym || gymInUse(entries, id)) {
     await tx.done;
     throw Error("ยิมนี้ยังมีเครื่องที่ใช้อยู่หรือมีประวัติการฝึก ลบไม่ได้");
   }
   const updatedAt = new Date().toISOString();
   const saved = entries.find((e) => e.id === gymCatalogId);
-  const all = [...(saved && !saved.deleted ? saved.data.gyms as Gym[] : gymsFor(entries))];
+  const all = [...(saved && !saved.deleted ? saved.data.gyms as Gym[] : gymsFor(entries))].filter((item) => item.id !== noGym);
   const catalog = { id: gymCatalogId, kind: "settings" as const, version: 0, ...saved, updatedAt, dirty: true, deleted: false,
     data: { gyms: [...all.filter((item) => item.id !== id), { ...gym, archived: true, removed: true }] } };
   validateEntry(catalog);
@@ -265,17 +266,15 @@ export async function storePhoto(id: string, blob: Blob) {
 export async function clearPhotoBlob(id: string) {
   await (await db).delete("photos", id);
 }
+/** 720 pixels on the short side is enough to read a screen or recognise a machine, and keeps storage in the free plan. */
+export const photoScale = (width: number, height: number) =>
+  Math.min(1, 720 / Math.min(width, height), 3000 / Math.max(width, height));
 export async function addPhoto(file: Blob, label: string) {
   assertWritable();
   if (file.size > 30 * 1024 * 1024) throw Error("รูปต้องไม่เกิน 30 MB");
   if (!file.type.startsWith("image/")) throw Error("เลือกไฟล์รูปภาพ");
   const bitmap = await createImageBitmap(file);
-  const scale = Math.min(
-    1,
-    1800 / bitmap.width,
-    12000 / bitmap.height,
-    Math.sqrt(12_000_000 / (bitmap.width * bitmap.height)),
-  );
+  const scale = photoScale(bitmap.width, bitmap.height);
   const c = document.createElement("canvas");
   c.width = Math.round(bitmap.width * scale);
   c.height = Math.round(bitmap.height * scale);
@@ -285,7 +284,7 @@ export async function addPhoto(file: Blob, label: string) {
     c.toBlob(
       (b) => (b ? resolve(b) : reject(Error("อ่านรูปไม่ได้"))),
       "image/jpeg",
-      0.86,
+      0.8,
     ),
   );
   const id: string = crypto.randomUUID();

@@ -145,7 +145,9 @@ import StrengthTile from "./StrengthTile";
 import SetTable from "./SetTable";
 import { copyText } from "./clipboard";
 import WorkoutSummary, { MachineInsights, WorkoutNumbers } from "./WorkoutSummary";
-import { muscleIds, muscleLabels, musclesFor, muscleText } from "./muscles";
+import { CatalogBrowser, CatalogSearch, HowTo, useCatalog } from "./ExerciseLibrary";
+import { noGym } from "./catalog";
+import { catalogIdOf, categoryLabel, categoryOf, legacyGroup, legMuscles, muscleIds, muscleLabels, musclesFor, muscleText, stretchCategory } from "./muscles";
 import { kg, recordLabels, sessionSets, sessionVolume, setRecords, setsBefore, previousExercise, warmupSets } from "./workoutStats";
 type Context = {
   entries: Entry[];
@@ -190,12 +192,13 @@ function exerciseFor(
     setup: m.setup,
     loadMode: m.loadMode,
     note: "",
+    record: m.record,
     target,
     // The planned repetitions are only a starting value; a set counts after it is confirmed.
     sets: Array.from({ length: target.sets }, (_, index) => {
       const before = suggestedSets[Math.min(index, suggestedSets.length - 1)];
       return {
-        id: uid(), reps: target.reps, warmup: false, done: false,
+        ...(m.record && before), id: uid(), reps: m.record && m.record !== "added" ? before?.reps ?? null : target.reps, warmup: false, done: false,
         load: before ? totalLoad(before, last!.loadMode) : null,
         ...(before && { enteredAs: before.enteredAs ?? (last!.loadMode === "per-side" ? "perSide" : "total") }),
       };
@@ -206,6 +209,7 @@ function exerciseFor(
     setup: m.setup,
     loadMode: m.loadMode,
     note: "",
+    record: m.record,
     sets: suggestedSets.length
       ? suggestedSets.map((set) => ({
           ...set, id: uid(), done: false,
@@ -1294,10 +1298,14 @@ function MissingGymMachines({
           thai: m.thai,
           aliases: m.aliases,
           group: m.group,
+          category: m.category,
+          catalogId: m.catalogId,
+          trains: m.trains,
+          record: m.record,
           gym,
           setup: "",
           cues: "",
-          loadMode: "total",
+          loadMode: m.record || m.loadMode === "bodyweight" || m.loadMode === "assistance" ? m.loadMode : "total",
           photoId,
         };
         choose(await save("machine", machine, id));
@@ -1377,6 +1385,7 @@ function MachinePicker({
             </button>
           ))}
         {gym && <MissingGymMachines gym={gym} entries={entries} choose={choose} query={query} />}
+        <CatalogSearch query={query} gym={gym || noGym} choose={choose} />
         {query.trim() && gym && <button className="secondary" onClick={() => setCreate(true)}>+ สร้างท่าใหม่ «{query.trim()}»</button>}
       </div>
       {create && <MachineForm initialName={query.trim()} fixedGym={gym} close={() => setCreate(false)} onSaved={(_, saved) => choose(saved)} />}
@@ -1618,7 +1627,7 @@ function MachineTile({ e, onClick }: { e: Entry; onClick: () => void }) {
     "incline press": "ดันอกแนวเฉียงขึ้น",
   } as Record<string, string>)[m.name.trim().toLowerCase()];
   return (
-    <StrengthTile name={m.name} thai={thai} group={m.group} location={gymName(entries, m.gym)} onClick={onClick}
+    <StrengthTile name={m.name} thai={thai} group={categoryLabel(categoryOf(m))} location={gymName(entries, m.gym)} onClick={onClick}
       photo={<MachineCover entry={e} entries={entries} />}>
         <p className="muted">
           มีเครื่องที่: {[...new Set(machineVariants(entries, m).map((x) => gymName(entries, x.data.gym)))].join(" · ")}
@@ -1648,16 +1657,19 @@ function Machines() {
     [gym, setGym] = useState(""),
     [savedGroup, setGroup] = useRememberedView("strength-category", "ทั้งหมด"),
     [selected, setSelected] = useRememberedView("machine-detail"),
+    [view, setView] = useRememberedView("strength-view", "mine"),
     [create, setCreate] = useState(false),
     [showArchived, setShowArchived] = useState(false);
-  const group = savedGroup ?? "ทั้งหมด";
+  const used = new Set(entries.filter((e) => e.kind === "machine" && !e.deleted && (!e.data.archived || showArchived)).map((e) => categoryOf(e.data)));
+  const categories = [...muscleIds, stretchCategory].filter((id) => used.has(id as typeof stretchCategory));
+  const group = savedGroup && (categories as string[]).includes(savedGroup) ? savedGroup : "ทั้งหมด";
   const machines = entries.filter(
     (e) =>
       e.kind === "machine" &&
       !e.deleted &&
       (!e.data.archived || showArchived) &&
       (!gym || e.data.gym === gym) &&
-      (group === "ทั้งหมด" || e.data.group === group) &&
+      (group === "ทั้งหมด" || categoryOf(e.data) === group) &&
       [e.data.name, e.data.thai, ...(e.data.aliases ?? [])].join(" ")
         .toLowerCase()
         .includes(query.toLowerCase()),
@@ -1670,6 +1682,11 @@ function Machines() {
           เพิ่มเครื่อง / ท่า
         </button>
       </Header>
+      <div className="chips" role="group" aria-label="แสดง">
+        <button className={view !== "catalog" ? "selected" : ""} aria-pressed={view !== "catalog"} onClick={() => setView("mine")}>เครื่องของเรา</button>
+        <button className={view === "catalog" ? "selected" : ""} aria-pressed={view === "catalog"} onClick={() => setView("catalog")}>คลังท่าสากล</button>
+      </div>
+      {view === "catalog" ? <CatalogBrowser openMachine={setSelected} /> : <>
       <div className="toolbar">
         <label className="search">
           <Search size={18} />
@@ -1689,20 +1706,20 @@ function Machines() {
           {gymsFor(entries).filter((item) => !item.archived || showArchived).map((item) => <option key={item.id} value={item.id}>{item.name}{item.id === "Jett" ? " · สถิติเก่า" : ""}</option>)}
         </select>
       </div>
-      <div className="chips">
-        {["ทั้งหมด", "อก", "หลัง", "ขา", "แกนกลาง", "ไหล่", "แขน", "อื่น ๆ", "Stretch"].map(
+      <div className="chips category-chips">
+        {["ทั้งหมด", ...categories].map(
           (g) => (
             <button
               className={group === g ? "selected" : ""}
               key={g}
               onClick={() => setGroup(g)}
             >
-              {g}
+              {g === "ทั้งหมด" ? g : categoryLabel(g)}
             </button>
           ),
         )}
       </div>
-      {group !== "Stretch" && (
+      {group !== stretchCategory && (
       <label className="check-label archive-toggle">
         <input
           type="checkbox"
@@ -1717,7 +1734,9 @@ function Machines() {
           <MachineTile key={e.id} e={e} onClick={() => setSelected(e.id)} />
         ))}
       </div>
-      {!machines.length && <Empty text="ยังไม่มีเครื่องหรือท่าในหมวดนี้" />}
+      {!machines.length && <Empty text="ยังไม่มีเครื่องหรือท่าในหมวดนี้" action={
+        <button className="secondary" onClick={() => setView("catalog")}>ดูคลังท่าสากล</button>} />}
+      </>}
       {selected && entries.some((e) => e.id === selected && e.kind === "machine" && !e.deleted) && (
         <MachineDetail key={selected} id={selected} close={() => setSelected(null)} selectMachine={setSelected} />
       )}{" "}
@@ -1865,7 +1884,7 @@ function MachineDetail({ id, close, selectMachine }: {
       <div className="detail-body" ref={body}>
         <div className="focus-title">
           <small>
-            {gymName(entries, m.gym)} · {m.group} · {loadLabel(m.loadMode)}
+            {gymName(entries, m.gym)} · {categoryLabel(categoryOf(m))} · {loadLabel(m.loadMode)}
           </small>
           <h3>{m.name}</h3>
           {m.thai && <p className="muted">{m.thai}</p>}
@@ -1915,10 +1934,11 @@ function MachineDetail({ id, close, selectMachine }: {
         </div>
         <div>
           <h4>วิธีเล่น</h4>
-          <p className="preserve">{m.cues || "ยังไม่มีบันทึก"}</p>
+          {(m.cues || !catalogIdOf(m)) && <p className="preserve">{m.cues || "ยังไม่มีบันทึก"}</p>}
           {exerciseDemoLink(m.name) && (
             <a className="text-button" href={exerciseDemoLink(m.name)} target="_blank" rel="noreferrer">ดูตัวอย่างท่า</a>
           )}
+          {catalogIdOf(m) && <HowTo catalogId={catalogIdOf(m)!} images={!shown && !guide} open />}
         </div>
         <div>
           <h4>รูปเครื่อง</h4>
@@ -2122,8 +2142,14 @@ function MachineForm({
   const [name, setName] = useState(m?.name ?? variantOf?.data.name ?? initialName ?? "");
   const [match, setMatch] = useState<Entry | null>(variantOf ?? null);
   const [distinct, setDistinct] = useState(false);
-  const [muscles, setMuscles] = useState<Machine["muscles"]>(m?.muscles ?? variantOf?.data.muscles);
-  const shownMuscles = muscles ?? musclesFor({ name, group: m?.group ?? "" });
+  const base = m ?? (variantOf?.data as Machine | undefined);
+  const [muscles, setMuscles] = useState<Machine["trains"]>(base?.trains ?? base?.muscles);
+  const auto = { name, group: base?.group ?? "", catalogId: base?.catalogId };
+  const shownMuscles = muscles ? musclesFor({ ...auto, trains: muscles }) : musclesFor(auto);
+  const [category, setCategory] = useState(base ? categoryOf(base) as string : "");
+  const automatic = categoryOf({ ...auto, trains: muscles });
+  const catalog = useCatalog();
+  const linked = catalogIdOf(base);
   const cycleMuscle = (muscle: string) => {
     const primary = shownMuscles.primary.filter((item) => item !== muscle) as string[];
     const secondary = shownMuscles.secondary.filter((item) => item !== muscle) as string[];
@@ -2144,6 +2170,13 @@ function MachineForm({
           const f = new FormData(e.currentTarget);
           if (suggestions.length && !match && !distinct) return;
           const matched = match?.data as Machine | undefined;
+          // Typing the name again keeps the same exercise; clearing the box means it has none.
+          const chosenCatalog = (text: string) => {
+            if (!catalog || (!base && !text.trim())) return base?.catalogId;
+            const item = catalog.find(({ th, en }) => text.trim() === `${th} · ${en}`);
+            const id = item?.id ?? "";
+            return id === (catalogIdOf({ name, group: "" }) ?? "") ? undefined : id;
+          };
           void run(async () => {
             const saved = await save(
               "machine",
@@ -2155,11 +2188,16 @@ function MachineForm({
                 aliases: matched?.aliases ?? m?.aliases,
                 label: String(f.get("label")).trim(),
                 gym: fixedGym ?? f.get("gym"),
-                group: matched?.group ?? f.get("group"),
+                group: matched?.group ?? (base?.group === "Stretch" ? "Stretch" : base && (category || automatic) === categoryOf(base) ? base.group : legacyGroup(category || automatic)),
+                category: matched ? matched.category : category && category !== automatic && category !== stretchCategory ? category : undefined,
+                catalogId: matched ? matched.catalogId : chosenCatalog(String(f.get("catalog") ?? "")),
+                record: matched?.record ?? base?.record,
                 setup: f.get("setup"),
                 cues: f.get("cues"),
                 loadMode: f.get("loadMode"),
-                muscles: muscles?.primary.length || muscles?.secondary.length ? muscles : undefined,
+                muscles: undefined,
+                trains: muscles?.primary.length || muscles?.secondary.length
+                  ? { primary: shownMuscles.primary, secondary: shownMuscles.secondary } : undefined,
               },
               entry?.id,
             );
@@ -2185,10 +2223,10 @@ function MachineForm({
               {gyms.map((gym) => <option key={gym.id} value={gym.id}>{gym.name}</option>)}
             </select>
           </Field>
-          <Field label="กล้ามเนื้อ">
-            <select name="group" defaultValue={m?.group ?? "อื่น ๆ"}>
-              {["อก", "หลัง", "ขา", "แกนกลาง", "ไหล่", "แขน", "อื่น ๆ"].map((g) => (
-                <option key={g}>{g}</option>
+          <Field label="หมวด (กล้ามเนื้อหลัก)">
+            <select value={category || automatic} disabled={base?.group === "Stretch"} onChange={(e) => setCategory(e.target.value)}>
+              {[...muscleIds, ...(base?.group === "Stretch" ? [stretchCategory] : [])].map((id) => (
+                <option key={id} value={id}>{categoryLabel(id)}</option>
               ))}
             </select>
           </Field>
@@ -2208,6 +2246,13 @@ function MachineForm({
               </button>
             </div>
           </div>
+        )}
+        {catalog && base?.group !== "Stretch" && (
+          <Field label="ท่าในคลังสากล (ใช้แสดงวิธีทำละเอียด)">
+            <input name="catalog" list="catalog-names" autoComplete="off" placeholder="พิมพ์ค้นหา หรือเว้นว่าง"
+              defaultValue={catalog.filter(({ id }) => id === linked).map(({ th, en }) => `${th} · ${en}`)[0] ?? ""} />
+            <datalist id="catalog-names">{catalog.filter(({ archived }) => !archived).map(({ id, th, en }) => <option key={id} value={`${th} · ${en}`} />)}</datalist>
+          </Field>
         )}
         <Field label="ป้ายแยกเครื่อง (ถ้ามี)">
           <input name="label" defaultValue={m?.label} placeholder="เช่น เครื่องสีส้ม" />
@@ -2337,8 +2382,8 @@ function StartSession({
                       (e) =>
                         !isStretch(e.id) && (t === "Full Body" ||
                           (t === "Lower Body"
-                            ? ["ขา", "แกนกลาง"].includes(e.data.group)
-                            : !["ขา"].includes(e.data.group))),
+                            ? [...legMuscles, "abdominals"].includes(categoryOf(e.data))
+                            : !legMuscles.includes(categoryOf(e.data)))),
                     )
                     .map((e) => e.id),
                 );
@@ -2399,6 +2444,8 @@ function StartSession({
         <MissingGymMachines key={gym} gym={gym} entries={entries} choose={(picked) =>
           setSelection((current) => current.includes(picked.id) ? current : [...current, picked.id])
         } />
+        {gym && <CatalogSearch query={query} gym={gym} choose={(picked) =>
+          setSelection((current) => current.includes(picked.id) ? current : [...current, picked.id])} />}
         {gym && query.trim() && <button className="secondary" onClick={() => setCreate(true)}>+ สร้างท่าใหม่ «{query.trim()}»</button>}
         <button
           className="primary wide"
@@ -3842,7 +3889,7 @@ function ConnectionRecovery() {
 }
 function GymSettings() {
   const { entries, run } = useData();
-  const gyms = gymsFor(entries);
+  const gyms = gymsFor(entries).filter((gym) => gym.id !== noGym);
   const [editing, setEditing] = useState<Gym | null>(null);
   const editNew = () => setEditing({ id: uid(), name: "", shortCode: "", archived: false });
   return (
@@ -3872,7 +3919,7 @@ function GymSettings() {
               const current = await allEntries();
               const removed = (current.find((e) => e.id === gymCatalogId && !e.deleted)?.data.gyms as Gym[] | undefined ?? [])
                 .filter((gym) => gym.removed);
-              const latest = gymsFor(current);
+              const latest = gymsFor(current).filter((gym) => gym.id !== noGym);
               // Typing a removed gym's name again brings it back instead of creating a second one.
               const back = removed.find((gym) => gym.name.trim().toLowerCase() === updated.name.toLowerCase());
               await save("settings", {
@@ -4428,7 +4475,12 @@ export function SessionEditor({
     </Modal>
   );
 }
+/** Everything a set of this exercise needs before it can be confirmed. */
+const setReady = (a: SetLog, x: ExerciseLog) => !!a.reps && a.reps > 0 && hasLoad(a, x.loadMode) &&
+  (x.record !== "time" && x.record !== "distance_time" || !!a.holdSeconds) && (x.record !== "distance" && x.record !== "distance_time" || !!a.meters);
 const emptySet = (prev?: SetLog): SetLog => ({
+  ...(prev?.timed && { timed: true, holdSeconds: prev.holdSeconds }),
+  ...(prev?.meters != null && { meters: prev.meters }),
   id: uid(),
   load: prev?.load ?? null,
   enteredAs: prev?.enteredAs,
@@ -4557,8 +4609,7 @@ function SessionEditorForm({
           !x.reportedOnly &&
           x.sets.some(
             (a) =>
-              a.done &&
-              (a.reps === null || a.reps <= 0 || !hasLoad(a, x.loadMode)),
+              a.done && !setReady(a, x),
           ),
       )
     ) {
@@ -4599,8 +4650,8 @@ function SessionEditorForm({
   }, [s.status, s.startedAt]);
   const toggleSet = (i: number, j: number) => {
     const exercise = s.exercises[i], a = exercise.sets[j];
-    if (!a.done && (!a.reps || !hasLoad(a, exercise.loadMode))) {
-      notify("กรอกน้ำหนักและจำนวนครั้งก่อนยืนยัน");
+    if (!a.done && !setReady(a, exercise)) {
+      notify(exercise.record && exercise.record !== "added" ? "กรอกเวลาหรือระยะให้ครบก่อนยืนยัน" : "กรอกน้ำหนักและจำนวนครั้งก่อนยืนยัน");
       return;
     }
     patchSet(i, j, { done: !a.done });
@@ -4636,7 +4687,7 @@ function SessionEditorForm({
     const first = exercise.sets.find((set) => !set.warmup && set.load !== null);
     const load = first && totalLoad(first, exercise.loadMode);
     const steps = load ? warmupSets(load, exercise.loadMode === "per-side" ? 5 : 2.5) : [];
-    if (!steps.length) return notify("กรอกน้ำหนักเซตจริงก่อน แล้วลิลลี่จะคำนวณเซตวอร์มให้");
+    if (!steps.length) return notify("กรอกน้ำหนักเซตจริงก่อน แล้วแอปจะคำนวณเซตวอร์มให้");
     const mode: SetLog["enteredAs"] = exercise.loadMode === "per-side" ? "perSide" : "total";
     update(i, { ...exercise, sets: [
       ...steps.map((step): SetLog => ({ id: uid(), load: step.load, reps: step.reps, enteredAs: mode, warmup: true, done: false })),
@@ -5066,7 +5117,7 @@ function ExerciseFocus({
       </div>
       <div className="focus-title">
         <small>
-          {m && gymName(entries, m.gym)} · {m?.group} · {loadLabel(x.loadMode)}
+          {m && gymName(entries, m.gym)} · {m && categoryLabel(categoryOf(m))} · {loadLabel(x.loadMode)}
         </small>
         <h3>{m?.name ?? "ไม่ทราบเครื่อง"}</h3>
         {m?.thai && <p className="muted">{m.thai}</p>}
@@ -5210,6 +5261,7 @@ function ExerciseFocus({
           <p className="preserve">{m.cues}</p>
         </details>
       )}
+      {m && catalogIdOf(m) && <HowTo catalogId={catalogIdOf(m)!} images={!machinePhotoIds(entries, x.machineId, m).main && !exerciseGuide(m.name)} open={!m.cues} />}
       <Field label="โน้ตท่านี้">
         <input
           value={x.note}

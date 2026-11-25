@@ -137,3 +137,11 @@ describe("durable records and backup", () => {
     expect(await (await photoBlob("test-photo"))?.text()).toBe("photo");
   });
 });
+it("stores new photos no larger than 720 pixels on the short side and never enlarges them", async () => {
+  const { photoScale } = await import("./db");
+  const size = (w: number, h: number) => [w, h].map((side) => Math.round(side * photoScale(w, h)));
+  expect(size(4032, 3024)).toEqual([960, 720]);
+  expect(size(1206, 2622)).toEqual([720, 1565]);
+  expect(size(1080, 9000)).toEqual([360, 3000]);
+  expect(size(640, 480)).toEqual([640, 480]);
+});

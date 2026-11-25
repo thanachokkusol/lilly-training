@@ -127,13 +127,17 @@ export const totalLoad = (set: SetLog, mode: LoadMode) =>
   set.load === null ? null : set.load * (!set.enteredAs && mode === "per-side" ? 2 : 1);
 export const loadText = (s: SetLog, mode: LoadMode) =>
   mode === "bodyweight"
-    ? "น้ำหนักตัว"
+    ? s.load ? `น้ำหนักตัว +${s.load} กก.` : "น้ำหนักตัว"
     : s.load !== null
       ? mode === "assistance"
         ? `${s.load} ${loadLabel(mode)}`
         : `${totalLoad(s, mode)} กก.${(s.enteredAs === "perSide" || (!s.enteredAs && mode === "per-side")) ? ` (ข้างละ ${totalLoad(s, mode)! / 2})` : ""}`
       : s.loadText?.trim() || "ไม่ทราบน้ำหนัก";
+export const secondsText = (seconds: number) => seconds < 60 ? `${seconds} วิ` :
+  `${Math.floor(seconds / 60)}:${(seconds % 60).toString().padStart(2, "0")} นาที`;
 export const formatSet = (s: SetLog, mode: LoadMode) =>
+  s.meters != null ? [mode !== "bodyweight" && loadText(s, mode), `${s.meters} ม.`, s.holdSeconds != null && secondsText(s.holdSeconds)].filter(Boolean).join(" × ") :
+  s.timed && s.holdSeconds != null ? secondsText(s.holdSeconds) :
   s.holdSeconds != null ? `ค้าง ${s.holdSeconds} วิ × ${s.reps ?? "ไม่ทราบ"} ครั้ง` :
     `${loadText(s, mode)} × ${s.reps ?? "ไม่ทราบ"} ครั้ง${s.type === "drop" ? " (ดรอป)" : s.type === "failure" ? " (จนหมดแรง)" : ""}`;
 /** A set has a usable load when it is bodyweight, numeric, or kept as the original text. */

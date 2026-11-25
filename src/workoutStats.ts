@@ -3,14 +3,14 @@ import { musclesFor, type Muscle } from "./muscles";
 import { isStretch } from "./stretchTraining";
 import type { Entry, ExerciseLog, LoadMode, Machine, Session, SetLog } from "./types";
 
-/** A confirmed set that counts: not a warm-up and not a timed stretch. */
-export const isWorkingSet = (set: SetLog) => set.done && !set.warmup && set.holdSeconds == null;
+/** A confirmed set that counts. Stretches are left out by exercise, not by set. */
+export const isWorkingSet = (set: SetLog) => set.done && !set.warmup;
 const numeric = (mode: LoadMode) => mode === "total" || mode === "per-side";
 export const setVolume = (set: SetLog, mode: LoadMode) =>
-  numeric(mode) && set.load !== null && set.reps ? totalLoad(set, mode)! * set.reps : 0;
+  numeric(mode) && set.load !== null && set.reps && set.meters == null ? totalLoad(set, mode)! * set.reps : 0;
 /** Epley estimate; only used up to 12 repetitions, where it stays meaningful. */
 export const estimatedMax = (set: SetLog, mode: LoadMode) =>
-  numeric(mode) && set.load !== null && set.reps && set.reps <= 12
+  numeric(mode) && set.load !== null && set.reps && set.reps <= 12 && set.meters == null
     ? totalLoad(set, mode)! * (set.reps === 1 ? 1 : 1 + set.reps / 30) : 0;
 /** Reported results have no confirmed number of sets, so they never enter set or volume totals. */
 const counted = (session: Session) => session.exercises.filter((x) => !x.reportedOnly && !isStretch(x.machineId));
@@ -53,18 +53,27 @@ export function previousExercise(entries: Entry[], machineId: string, before: Be
   return undefined;
 }
 
-export type RecordKind = "weight" | "max" | "volume" | "reps" | "assist";
+export type RecordKind = "weight" | "max" | "volume" | "reps" | "assist" | "time" | "distance" | "added";
 export const recordLabels: Record<RecordKind, string> = {
   weight: "น้ำหนักมากสุด",
   max: "1RM โดยประมาณ",
   volume: "ปริมาณต่อเซต",
   reps: "จำนวนครั้งมากสุด",
   assist: "ใช้แรงช่วยน้อยสุด",
+  time: "เวลานานสุด",
+  distance: "ระยะไกลสุด",
+  added: "น้ำหนักเพิ่มมากสุด",
 };
 /** Which records a set beats. The first time on a machine is a starting point, not a record. */
 export function setRecords(past: Past[], set: SetLog, mode: LoadMode): RecordKind[] {
   if (!isWorkingSet(set) || !set.reps) return [];
   const same = past.filter((p) => numeric(mode) ? numeric(p.mode) : p.mode === mode);
+  if (set.meters != null && mode === "bodyweight")
+    return same.length && set.meters > Math.max(0, ...same.map((p) => p.set.meters ?? 0)) ? ["distance"] : [];
+  if (set.timed)
+    return same.length && (set.holdSeconds ?? 0) > Math.max(0, ...same.map((p) => p.set.holdSeconds ?? 0)) ? ["time"] : [];
+  if (mode === "bodyweight" && set.load)
+    return same.length && set.load > Math.max(0, ...same.map((p) => p.set.load ?? 0)) ? ["added"] : [];
   if (mode === "bodyweight")
     return same.length && set.reps > Math.max(...same.map((p) => p.set.reps ?? 0)) ? ["reps"] : [];
   const known = same.filter((p) => p.set.load !== null);
@@ -108,7 +117,7 @@ export function compareExercise(entries: Entry[], entry: Entry, x: ExerciseLog) 
 /** Personal records of one machine, with the date each was set. */
 export function machineRecords(entries: Entry[], machineId: string) {
   type Best = { value: number; date: string; reps: number };
-  const out: { weight?: Best; max?: Best; volume?: Best; session?: Best; reps?: Best; byReps: [number, Best][] } = { byReps: [] };
+  const out: { weight?: Best; max?: Best; volume?: Best; session?: Best; reps?: Best; time?: Best; distance?: Best; added?: Best; byReps: [number, Best][] } = { byReps: [] };
   const byReps = new Map<number, Best>();
   const better = (current: Best | undefined, value: number, date: string, reps: number) =>
     value > 0 && (!current || value > current.value + 1e-9) ? { value, date, reps } : current;
@@ -117,14 +126,17 @@ export function machineRecords(entries: Entry[], machineId: string) {
       const date = entry.data.date as string;
       for (const set of x.sets.filter(isWorkingSet)) {
         const reps = set.reps ?? 0;
-        if (x.loadMode === "bodyweight") out.reps = better(out.reps, reps, date, reps);
+        if (set.timed) out.time = better(out.time, set.holdSeconds ?? 0, date, reps);
+        if (set.meters != null) out.distance = better(out.distance, set.meters, date, reps);
+        if (x.loadMode === "bodyweight" && set.load) out.added = better(out.added, set.load, date, reps);
+        if (x.loadMode === "bodyweight" && !set.timed && set.meters == null) out.reps = better(out.reps, reps, date, reps);
         if (!numeric(x.loadMode) || set.load === null || !reps) continue;
         const load = totalLoad(set, x.loadMode)!;
         out.weight = better(out.weight, load, date, reps);
         out.max = better(out.max, estimatedMax(set, x.loadMode), date, reps);
         out.volume = better(out.volume, setVolume(set, x.loadMode), date, reps);
         const rep = better(byReps.get(reps), load, date, reps);
-        if (rep) byReps.set(reps, rep);
+        if (rep && set.meters == null) byReps.set(reps, rep);
       }
       if (!x.reportedOnly) out.session = better(out.session, exerciseVolume(x), date, 0);
     }
