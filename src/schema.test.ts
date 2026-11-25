@@ -174,8 +174,36 @@ describe.sequential("database access controls and optimistic writes", () => {
     await identity(trainer);
     expect((await db.query("select id from public.training_records where id='friend-cardio'")).rows).toHaveLength(0);
     expect((await db.query("select id from public.training_records where id='friend-equipment'")).rows).toHaveLength(1);
+    // The journal owner has no special access to a friend's private records.
     await identity(owner);
+    expect((await db.query("select id from public.training_records where id='friend-cardio'")).rows).toHaveLength(0);
+  });
+  it("a friend chooses a coach, who can then read but not write, and can be removed", async () => {
+    await identity(other);
+    const coaches = (await db.query<any>(`select * from public.list_coaches()`)).rows;
+    expect(coaches.map((c) => [c.id, c.coaching_me])).toContainEqual([trainer, false]);
+    expect(coaches.some((c) => c.id === owner || c.id === other)).toBe(false);
+    await db.query(`select public.set_my_coach('${trainer}', true)`);
+    await identity(trainer);
     expect((await db.query("select id from public.training_records where id='friend-cardio'")).rows).toHaveLength(1);
+    expect((await db.query<any>(`select display_name from public.profiles where id='${other}'`)).rows).toHaveLength(1);
+    await identity(other);
+    await expect(db.query(`select public.set_my_coach('${owner}', true)`)).rejects.toThrow("Unknown coach");
+    await db.query(`select public.set_my_coach('${trainer}', false)`);
+    await identity(trainer);
+    expect((await db.query("select id from public.training_records where id='friend-cardio'")).rows).toHaveLength(0);
+  });
+  it("only the owner manages the sign-up invite code", async () => {
+    await identity(other);
+    await expect(db.query(`select * from public.get_signup_settings()`)).rejects.toThrow("Unauthorized");
+    await expect(db.query(`select public.set_signup_settings(true, 'lilly-2026')`)).rejects.toThrow("Unauthorized");
+    await identity(owner);
+    expect((await db.query<any>(`select * from public.get_signup_settings()`)).rows[0]).toEqual({ enabled: false, invite_code: null });
+    await expect(db.query(`select public.set_signup_settings(true, 'x')`)).rejects.toThrow("Invalid invite code");
+    await db.query(`select public.set_signup_settings(true, 'lilly-2026')`);
+    expect((await db.query<any>(`select * from public.get_signup_settings()`)).rows[0]).toEqual({ enabled: true, invite_code: "lilly-2026" });
+    await identity(trainer);
+    await expect(db.exec(`select * from public.signup_settings`)).rejects.toThrow();
   });
   it("shares the legacy Jett machine photo without sharing owner evidence", async () => {
     await identity(owner);

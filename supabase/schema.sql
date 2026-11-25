@@ -53,7 +53,8 @@ revoke all on function public.is_training_owner() from public, anon;
 grant execute on function public.is_training_owner() to authenticated;
 
 create or replace function public.can_view_user(target uuid) returns boolean language sql stable security definer set search_path = '' as $$
- select target = auth.uid() or public.journal_role() = 'owner' or (public.journal_role() = 'trainer' and exists(
+ -- Everyone sees only their own journal; a coach also sees clients who chose them. The owner gets no extra access.
+ select target = auth.uid() or (public.journal_role() = 'trainer' and exists(
   select 1 from public.coach_links l join public.profiles p on p.id = l.trainer_id
   where l.trainer_id = auth.uid() and l.client_id = target and l.status = 'active' and l.can_view and not p.disabled)); $$;
 revoke all on function public.can_view_user(uuid) from public, anon;
@@ -142,7 +143,7 @@ insert into storage.buckets(id,name,public,file_size_limit,allowed_mime_types) v
 drop policy if exists training_photo_read on storage.objects;
 create policy training_photo_read on storage.objects for select to authenticated using (
  bucket_id='training-photos' and public.is_training_owner() and (
-  (storage.foldername(name))[1]=auth.uid()::text or public.journal_role()='owner' or exists (
+  (storage.foldername(name))[1]=auth.uid()::text or exists (
    select 1 from public.training_records r
     where r.kind='photo' and not r.deleted
       and (r.payload->>'_photoPath'=storage.objects.name
@@ -169,6 +170,67 @@ grant execute on function public.set_my_display_name(text) to authenticated;
 
 insert into public.profiles(id, role, display_name)
  select user_id, 'owner', '' from public.training_owners on conflict (id) do nothing;
+
+-- Coaches: any member chooses which coaches may view their journal (read-only).
+create or replace function public.list_coaches() returns table(id uuid, display_name text, coaching_me boolean)
+language sql stable security definer set search_path = '' as $$
+ select p.id, coalesce(nullif(p.display_name, ''), p.username, 'โค้ช'),
+  exists(select 1 from public.coach_links l where l.trainer_id = p.id and l.client_id = auth.uid() and l.status = 'active')
+ from public.profiles p
+ where public.is_training_owner() and p.role = 'trainer' and not p.disabled and p.id <> auth.uid()
+ order by 2; $$;
+revoke all on function public.list_coaches() from public, anon;
+grant execute on function public.list_coaches() to authenticated;
+
+create or replace function public.set_my_coach(trainer uuid, coached boolean) returns void
+language plpgsql security definer set search_path = '' as $$
+begin
+ if auth.uid() is null or not public.is_training_owner() then raise exception 'Unauthorized'; end if;
+ if trainer = auth.uid() or not exists(select 1 from public.profiles p where p.id = trainer and p.role = 'trainer' and not p.disabled) then
+  raise exception 'Unknown coach';
+ end if;
+ insert into public.coach_links(trainer_id, client_id, status, can_view)
+  values (trainer, auth.uid(), case when coached then 'active' else 'revoked' end, true)
+  on conflict (trainer_id, client_id) do update set status = excluded.status, can_view = true;
+end; $$;
+revoke all on function public.set_my_coach(uuid, boolean) from public, anon;
+grant execute on function public.set_my_coach(uuid, boolean) to authenticated;
+
+-- Self sign-up is only possible with the owner's invite code, checked by the member-signup Edge Function.
+create table if not exists public.signup_settings (
+ singleton boolean primary key default true check (singleton),
+ enabled boolean not null default false,
+ invite_code text check (invite_code is null or invite_code ~ '^[A-Za-z0-9-]{6,64}$'),
+ updated_at timestamptz not null default now()
+);
+alter table public.signup_settings enable row level security;
+revoke all on public.signup_settings from anon, authenticated;
+do $$ begin
+ if exists (select 1 from pg_roles where rolname = 'service_role') then
+  grant select on public.signup_settings to service_role;
+ end if;
+end $$;
+
+create or replace function public.get_signup_settings() returns table(enabled boolean, invite_code text)
+language plpgsql stable security definer set search_path = '' as $$
+begin
+ if public.journal_role() is distinct from 'owner' then raise exception 'Unauthorized'; end if;
+ return query select coalesce((select s.enabled from public.signup_settings s), false),
+                     (select s.invite_code from public.signup_settings s);
+end; $$;
+revoke all on function public.get_signup_settings() from public, anon;
+grant execute on function public.get_signup_settings() to authenticated;
+
+create or replace function public.set_signup_settings(new_enabled boolean, new_code text) returns void
+language plpgsql security definer set search_path = '' as $$
+begin
+ if public.journal_role() is distinct from 'owner' then raise exception 'Unauthorized'; end if;
+ if new_enabled and (new_code is null or new_code !~ '^[A-Za-z0-9-]{6,64}$') then raise exception 'Invalid invite code'; end if;
+ insert into public.signup_settings(singleton, enabled, invite_code, updated_at) values (true, new_enabled, new_code, now())
+  on conflict (singleton) do update set enabled = excluded.enabled, invite_code = excluded.invite_code, updated_at = now();
+end; $$;
+revoke all on function public.set_signup_settings(boolean, text) from public, anon;
+grant execute on function public.set_signup_settings(boolean, text) to authenticated;
 
 -- First setup only, after creating the owner via Dashboard > Authentication > Users:
 -- insert into public.training_owners(user_id) values ('THE-OWNER-AUTH-UUID');

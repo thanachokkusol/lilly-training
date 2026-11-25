@@ -115,9 +115,9 @@ Deno.serve(async (req) => {
       const disabled = body.disabled === true;
       const { error } = await admin.auth.admin.updateUserById(id, { ban_duration: disabled ? "876000h" : "none" });
       if (error) return fail(error.message, 500);
+      // A disabled profile already blocks all access; client links are left as each client chose them.
       const profile = await admin.from("profiles").update({ disabled }).eq("id", id);
-      const link = await admin.from("coach_links").update({ status: disabled ? "revoked" : "active" }).eq("trainer_id", id);
-      if (profile.error || link.error) return fail("เปลี่ยนสถานะบัญชีไม่สำเร็จ", 500);
+      if (profile.error) return fail("เปลี่ยนสถานะบัญชีไม่สำเร็จ", 500);
       return json({ ok: true });
     }
     case "remove": {

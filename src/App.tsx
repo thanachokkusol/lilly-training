@@ -106,7 +106,15 @@ import {
   type Client,
 } from "./cloud";
 import { setReadOnly } from "./db";
-import { TrainerAccounts, ChangePassword, EditDisplayName } from "./Accounts";
+import {
+  TrainerAccounts,
+  ChangePassword,
+  EditDisplayName,
+  MyClients,
+  MyCoaches,
+  SignupSettings,
+  SignupForm,
+} from "./Accounts";
 import PasswordInput from "./PasswordInput";
 /** Common equipment and programs; everything else belongs to one person. */
 const isSharedEntry = (e: Entry) =>
@@ -628,7 +636,7 @@ export default function App() {
     void myProfile().then(async (p) => {
       if (!live) return;
       setProfile(p);
-      const visible = p?.role === "trainer" || p?.role === "owner" ? await myClients(p.role) : [];
+      const visible = p ? await myClients(p.role) : [];
       if (live) setClients(visible);
     }).catch(() => { if (live) setClients([]); });
     return () => {
@@ -646,7 +654,7 @@ export default function App() {
     try {
       const records = await fetchUserRecords(client.id);
       if (request !== viewRequest.current) return;
-      setReadOnly(`กำลังดูข้อมูลของ ${client.name} · ดูอย่างเดียว กลับไปที่ "ของฉัน" เพื่อบันทึก`);
+      setReadOnly(`กำลังดูข้อมูลของ ลูกเทรน ${client.name} · ดูอย่างเดียว กลับไปที่ "ของฉัน" เพื่อบันทึก`);
       setClientRecords(records);
       setViewing(client);
     } catch (e) {
@@ -723,7 +731,7 @@ export default function App() {
                 <option value="">กำลังดู: ของฉัน</option>
                 {clients.map((c) => (
                   <option key={c.id} value={c.id}>
-                    กำลังดู: {c.name}
+                    กำลังดู: ลูกเทรน {c.name}
                   </option>
                 ))}
               </select>
@@ -750,7 +758,7 @@ export default function App() {
             )}
             {viewing && (
               <div className="notice view-banner">
-                <strong>กำลังดูข้อมูลของ {viewing.name} · ดูอย่างเดียว</strong>
+                <strong>กำลังดูข้อมูลของ ลูกเทรน {viewing.name} · ดูอย่างเดียว</strong>
                 <button className="secondary" onClick={() => void viewJournal(null)}>
                   กลับไปข้อมูลของฉัน
                 </button>
@@ -798,6 +806,7 @@ export default function App() {
                 openLogin={() => setLogin(true)}
                 profile={profile}
                 viewJournal={(client) => void viewJournal(client)}
+                clients={clients}
               />
             )}
           </div>
@@ -3452,7 +3461,9 @@ function HistoryPage() {
 }
 function Login({ close, done }: { close: () => void; done: () => void }) {
   const { run } = useData(),
-    [busy, setBusy] = useState(false);
+    [busy, setBusy] = useState(false),
+    [signup, setSignup] = useState(false);
+  if (signup) return <SignupForm close={close} back={() => setSignup(false)} done={done} />;
   return (
     <Modal title="เข้าสู่สมุดฝึกส่วนตัว" close={close}>
       <form
@@ -3505,7 +3516,9 @@ function Login({ close, done }: { close: () => void; done: () => void }) {
           <summary>ลืมรหัสผ่าน?</summary>
           ติดต่อเจ้าของสมุดเพื่อตั้งรหัสใหม่
         </details>
-        <p className="muted">ไม่มีการสมัครสาธารณะ บัญชีสร้างโดยเจ้าของ</p>
+        <button type="button" className="secondary" onClick={() => setSignup(true)}>
+          สมัครสมาชิก (ใช้รหัสเชิญ)
+        </button>
       </form>
     </Modal>
   );
@@ -3653,12 +3666,14 @@ function SettingsPage({
   openLogin,
   profile,
   viewJournal,
+  clients,
 }: {
   synchronize: () => void;
   busy: boolean;
   openLogin: () => void;
   profile: Profile | null;
   viewJournal: (client: Client) => void;
+  clients: Client[];
 }) {
   const { entries, run, notify } = useData(),
     [cfg, setCfg] = useState(config()),
@@ -3762,7 +3777,12 @@ function SettingsPage({
           </div>
         </section>
       )}
-      {profile?.role === "owner" && <TrainerAccounts viewJournal={viewJournal} />}
+      {profile?.role === "trainer" && (
+        <MyClients clients={clients} viewJournal={viewJournal} />
+      )}
+      {profile && profile.role !== "trainer" && <MyCoaches />}
+      {profile?.role === "owner" && <SignupSettings />}
+      {profile?.role === "owner" && <TrainerAccounts />}
       {showOwnerSettings && <RestShortcutSettings />}
       <section className="panel">
         <h2>เป้าหมายรายสัปดาห์</h2>

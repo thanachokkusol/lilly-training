@@ -273,24 +273,68 @@ export async function myProfile(): Promise<Profile | null> {
 }
 export type Client = { id: string; name: string };
 /** People whose journal the signed-in trainer may view. */
-export async function myClients(role: "owner" | "trainer"): Promise<Client[]> {
+/** Clients who chose the signed-in coach. Nobody else sees another person's journal. */
+export async function myClients(role: "owner" | "trainer" | "friend"): Promise<Client[]> {
+  if (role !== "trainer") return [];
   const c = await cloud();
   if (!c) return [];
   const { data: auth } = await c.auth.getUser();
   if (!auth.user) return [];
-  if (role === "owner") {
-    const { data, error } = await c.from("profiles").select("id,display_name,username").in("role", ["trainer", "friend"]);
-    if (error) throw error;
-    return (data ?? []).map((p) => ({ id: p.id, name: p.display_name || p.username || "สมาชิก" }));
-  }
   const { data: links } = await c.from("coach_links").select("client_id").eq("trainer_id", auth.user.id).eq("status", "active");
   const ids = (links ?? []).map((l) => l.client_id as string);
   if (!ids.length) return [];
   const { data: profiles } = await c.from("profiles").select("id,display_name,username").in("id", ids);
-  return ids.map((id) => {
-    const p = profiles?.find((x) => x.id === id);
-    return { id, name: p?.display_name || p?.username || "ลูกเทรน" };
-  });
+  return ids
+    .map((id) => {
+      const p = profiles?.find((x) => x.id === id);
+      return { id, name: p?.display_name || p?.username || "ยังไม่ได้ตั้งชื่อ" };
+    })
+    .sort((x, y) => x.name.localeCompare(y.name, "th"));
+}
+export type Coach = { id: string; name: string; coachingMe: boolean };
+export async function listCoaches(): Promise<Coach[]> {
+  const c = await cloud();
+  if (!c) return [];
+  const { data, error } = await c.rpc("list_coaches");
+  if (error) throw error;
+  return (data ?? []).map((r: any) => ({ id: r.id, name: r.display_name, coachingMe: r.coaching_me }));
+}
+export async function setMyCoach(trainer: string, coached: boolean) {
+  const c = await cloud();
+  if (!c) throw Error("ยังไม่ได้เชื่อม Supabase");
+  const { error } = await c.rpc("set_my_coach", { trainer, coached });
+  if (error) throw error;
+}
+export async function getSignupSettings(): Promise<{ enabled: boolean; inviteCode: string }> {
+  const c = await cloud();
+  if (!c) throw Error("ยังไม่ได้เชื่อม Supabase");
+  const { data, error } = await c.rpc("get_signup_settings");
+  if (error) throw error;
+  const row = Array.isArray(data) ? data[0] : data;
+  return { enabled: !!row?.enabled, inviteCode: row?.invite_code ?? "" };
+}
+export async function setSignupSettings(enabled: boolean, inviteCode: string) {
+  const c = await cloud();
+  if (!c) throw Error("ยังไม่ได้เชื่อม Supabase");
+  const { error } = await c.rpc("set_signup_settings", { new_enabled: enabled, new_code: inviteCode.trim() || null });
+  if (error) throw Error(/Invalid invite/.test(error.message) ? "รหัสเชิญใช้ A-Z a-z 0-9 และ - ยาว 6–64 ตัว" : error.message);
+}
+/** Create a friend account with the owner's invite code, then sign in. */
+export async function signUpWithInvite(input: { inviteCode: string; username: string; displayName: string; password: string }) {
+  const c = await cloud();
+  if (!c) throw Error("ยังไม่ได้เชื่อม Supabase");
+  const { data, error } = await c.functions.invoke("member-signup", { body: input });
+  if (error) {
+    let message = "สมัครไม่สำเร็จ";
+    try {
+      const detail = await (error as any).context?.json?.();
+      if (detail?.error) message = detail.error;
+    } catch { /* keep the generic message */ }
+    throw Error(message);
+  }
+  if (data?.error) throw Error(data.error);
+  const signIn = await c.auth.signInWithPassword({ email: loginEmail(input.username), password: input.password });
+  if (signIn.error) throw Error("สมัครแล้ว แต่เข้าสู่ระบบไม่สำเร็จ ลองเข้าสู่ระบบอีกครั้ง");
 }
 /** Read-only copy of another member's private records (RLS decides what is visible). */
 export async function fetchUserRecords(userId: string): Promise<Entry[]> {
