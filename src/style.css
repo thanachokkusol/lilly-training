@@ -2946,6 +2946,10 @@ summary {
   background: #fff6e6;
 }
 /* Read-only view of a client's journal: hide actions that would write. */
+.form-lock {
+  display: contents;
+}
+.viewing .content .edit-only,
 .viewing .content .primary,
 .viewing .content .routine-button,
 .viewing .content .set-check,

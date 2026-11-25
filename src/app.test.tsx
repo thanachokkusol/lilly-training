@@ -11,7 +11,7 @@ import {
   within,
   configure,
 } from "@testing-library/react";
-import App from "./App";
+import App, { Data, SessionEditor } from "./App";
 import TrainingCalendar from "./TrainingCalendar";
 import { save, allEntries } from "./db";
 import { dateLabel, today, weekOf } from "./core";
@@ -391,6 +391,34 @@ it("attaches a pasted image to the cardio log as evidence", async () => {
     Reflect.deleteProperty(URL, "revokeObjectURL");
     cleanup();
   }
+});
+it("shows a client's workout without any control that could change it", async () => {
+  const metadata = { version: 1, updatedAt: "2026-11-24T00:00:00Z", dirty: false };
+  const close = vi.fn();
+  render(
+    <Data.Provider value={{
+      readOnly: true, refresh: async () => {}, run: async (fn) => { await fn(); }, notify: () => {},
+      entries: [
+        { ...metadata, id: "m", kind: "machine", data: { name: "Seated Cable Row", thai: "", gym: "M Fitness", group: "หลัง", setup: "", cues: "", loadMode: "total" } },
+        { ...metadata, id: "s", kind: "session", data: { date: "2026-11-24", title: "Upper Body", status: "completed", note: "โน้ตลูกเทรน", exercises: [
+          { machineId: "m", originalName: "Seated Row", loadMode: "total", setup: "เบาะ 3", note: "", sets: [
+            { id: "1", load: 30, reps: 12, warmup: false, done: true }, { id: "2", load: 99, reps: 1, warmup: false, done: false }] },
+        ] } },
+      ],
+    }}>
+      <SessionEditor id="s" close={close} />
+    </Data.Provider>,
+  );
+  const dialog = await topDialog();
+  expect(dialog.getByText("30 กก. × 12 ครั้ง")).toBeTruthy();
+  expect(dialog.getByText("บันทึกเดิม: Seated Row")).toBeTruthy();
+  expect(dialog.getByText("โน้ตลูกเทรน")).toBeTruthy();
+  expect(dialog.queryByText(/99/)).toBeNull();
+  expect(dialog.queryAllByRole("textbox")).toHaveLength(0);
+  expect(dialog.queryAllByRole("spinbutton")).toHaveLength(0);
+  expect(dialog.getAllByRole("button").map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual(["ปิด", "คัดลอกสรุปเวท"]);
+  fireEvent.click(dialog.getByRole("button", { name: "ปิด" }));
+  expect(close).toHaveBeenCalledOnce();
 });
 it("opens set entry within two taps from a machine and joins today's draft", async () => {
   await save(

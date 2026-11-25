@@ -143,8 +143,9 @@ type Context = {
   refresh: () => Promise<void>;
   run: (fn: () => Promise<unknown>, msg?: string) => Promise<void>;
   notify: (m: string) => void;
+  readOnly: boolean;
 };
-const Data = createContext<Context>(null!);
+export const Data = createContext<Context>(null!);
 export const useData = () => useContext(Data);
 const number = (v: FormDataEntryValue | null) =>
   v === null || v === "" ? null : Number(v);
@@ -214,7 +215,7 @@ function Photo({
   className?: string;
 }) {
   const [src, setSrc] = useState("");
-  const { entries } = useData();
+  const { entries, readOnly } = useData();
   const revision = entries.find(
     (e) => e.id === id && e.kind === "photo",
   );
@@ -243,7 +244,7 @@ function Photo({
   ) : (
     <div className={`photo-empty ${className}`}>
       <Dumbbell size={36} />
-      <span>เพิ่มรูปเครื่องของคุณ</span>
+      <span>{readOnly ? "ยังไม่มีรูป" : "เพิ่มรูปเครื่องของคุณ"}</span>
     </div>
   );
 }
@@ -687,6 +688,7 @@ export default function App() {
         refresh,
         run,
         notify,
+        readOnly: !!viewing,
       }}
     >
       <div className={`app${viewing ? " viewing" : ""}`}>
@@ -870,7 +872,7 @@ const cardioSummary = (cardio: Cardio) =>
     .filter(Boolean).join(" · ");
 
 function Today({ nav }: { nav: (p: string) => void }) {
-  const { entries, run, refresh } = useData(),
+  const { entries, run, refresh, readOnly } = useData(),
     [start, setStart] = useState(false),
     [discardDraft, setDiscardDraft] = useState<string | null>(null),
     [cardioId, setCardioId] = useState<string | null>(null),
@@ -954,15 +956,15 @@ function Today({ nav }: { nav: (p: string) => void }) {
                 className="secondary wide"
                 onClick={() => setSession(draft.id)}
               >
-                ทำต่อจากที่ค้างไว้ <ChevronRight size={17} />
+                {readOnly ? "ดูรายการ" : "ทำต่อจากที่ค้างไว้"} <ChevronRight size={17} />
               </button>
-              <button className="text-button" onClick={() => setDiscardDraft(draft.id)}>
+              <button className="text-button edit-only" onClick={() => setDiscardDraft(draft.id)}>
                 ทิ้งร่างการฝึก
               </button>
             </>
           ) : (
             <>
-              <p className="muted">เลือกโปรแกรมเพื่อเริ่มบันทึก หรือเลือกเครื่องเอง</p>
+              <p className="muted">{readOnly ? "ไม่มีการฝึกที่ค้างอยู่" : "เลือกโปรแกรมเพื่อเริ่มบันทึก หรือเลือกเครื่องเอง"}</p>
               <div className="routine-buttons">
                 {lastWorkout && repeatable && (
                   <button className="routine-button" onClick={() => startRoutine({
@@ -1027,7 +1029,7 @@ function Today({ nav }: { nav: (p: string) => void }) {
               <Copy size={16} /> รายงานโค้ช
             </button>
             <button onClick={() => nav("cardio")}>
-              บันทึกคาร์ดิโอ <ArrowUpRight size={17} />
+              {readOnly ? "ดูคาร์ดิโอ" : "บันทึกคาร์ดิโอ"} <ArrowUpRight size={17} />
             </button>
           </div>
         </section>
@@ -1717,7 +1719,7 @@ function MachineDetail({ id, close, selectMachine }: {
             {gymName(entries, variant.data.gym)}{variant.data.label ? ` · ${variant.data.label}` : ""}
           </button>
         ))}
-        <button onClick={() => setAddVariant(true)}>เพิ่มเครื่องของท่านี้</button>
+        <button className="edit-only" onClick={() => setAddVariant(true)}>เพิ่มเครื่องของท่านี้</button>
       </div>
       <div className="detail-photo"
         onTouchStart={(event) => { touchStart.current = event.touches[0]?.clientX ?? null; }}
@@ -1799,7 +1801,7 @@ function MachineDetail({ id, close, selectMachine }: {
         </div>
         <div>
           <h4>รูปเครื่อง</h4>
-          <p className="muted">วางรูปที่คัดลอกไว้เพื่อเพิ่มรูปได้</p>
+          <p className="muted edit-only">วางรูปที่คัดลอกไว้เพื่อเพิ่มรูปได้</p>
           <div className="photo-strip">
             {photos.map((p) => (
               <button
@@ -1842,7 +1844,7 @@ function MachineDetail({ id, close, selectMachine }: {
             </label>
           </div>
           {shown && photoIndex >= 0 && (
-            <div className="upload-row">
+            <div className="upload-row edit-only">
               {shown !== mainPhoto && <button className="secondary" onClick={() =>
                 run(() => setMainPhoto(shown), "ตั้งรูปหลักแล้ว")}>ใช้รูปที่เปิดเป็นรูปหลัก</button>}
               <button className="text-button" onClick={() => setConfirmPhotoTrash(true)}>ลบรูปที่เปิด</button>
@@ -1893,7 +1895,7 @@ function MachineDetail({ id, close, selectMachine }: {
           <ExerciseChart entries={entries} machines={entries.filter((item) =>
             item.kind === "machine" && !item.deleted && exerciseKey(item.data) === exerciseKey(m)
           )} />
-        <div className="upload-row">
+        <div className="upload-row edit-only">
           <button className="secondary" onClick={() => setEdit(true)}>
             แก้ไขรายละเอียด
           </button>
@@ -2634,7 +2636,7 @@ function CardioForm({ entry, close }: { entry?: Entry; close: () => void }) {
   const draft = useFormDraft("cardio", entry);
   const form = useRef<HTMLFormElement>(null);
   const [revision, setRevision] = useState(0);
-  const { entries, run, notify } = useData(),
+  const { entries, run, notify, readOnly } = useData(),
     c = entry?.data as Cardio | undefined,
     [date, setDate] = useState(draft.initial.date ?? c?.date ?? today()),
     [weekOverride, setWeekOverride] = useState<string | null>(
@@ -2690,7 +2692,7 @@ function CardioForm({ entry, close }: { entry?: Entry; close: () => void }) {
   };
   usePastedImage(form, upload);
   return (
-    <Modal title={entry ? "แก้ไขล็อกคาร์ดิโอ" : "บันทึกคาร์ดิโอ"} close={close}>
+    <Modal title={readOnly ? "ล็อกคาร์ดิโอ" : entry ? "แก้ไขล็อกคาร์ดิโอ" : "บันทึกคาร์ดิโอ"} close={close}>
       <form
         ref={form}
         key={revision}
@@ -2760,6 +2762,7 @@ function CardioForm({ entry, close }: { entry?: Entry; close: () => void }) {
           });
         }}
       >
+        <fieldset className="form-lock" disabled={readOnly}>
         {Object.keys(draft.initial).length > 0 && (
           <div className="notice">
             เปิดแบบร่างที่กรอกค้างไว้แล้ว
@@ -2778,7 +2781,7 @@ function CardioForm({ entry, close }: { entry?: Entry; close: () => void }) {
             }}>ทิ้งแบบร่าง</button>
           </div>
         )}
-        <div className="upload-drop">
+        <div className="upload-drop edit-only">
           <ImagePlus size={26} />
           <h3>เริ่มจากรูปหน้าจอเครื่องได้เลย</h3>
           <p>อ่านตัวเลขในเครื่องนี้ แล้วตรวจให้ตรงก่อนยืนยัน · วางรูปที่คัดลอกไว้ได้เลย</p>
@@ -2811,7 +2814,7 @@ function CardioForm({ entry, close }: { entry?: Entry; close: () => void }) {
             <Photo id={photoId} alt="หลักฐานคาร์ดิโอ" />
             <button
               type="button"
-              className="text-button"
+              className="text-button edit-only"
               onClick={() =>
                 run(async () => {
                   const b = await photoBlob(photoId);
@@ -2917,7 +2920,7 @@ function CardioForm({ entry, close }: { entry?: Entry; close: () => void }) {
         )}
         {previewSeconds !== null && (
           <p className="muted" aria-live="polite">
-            ยอดรอบนี้หลังบันทึก {minuteDuration(previewSeconds)} / {goal} นาที
+            {readOnly ? "ยอดรอบที่นับ" : "ยอดรอบนี้หลังบันทึก"} {minuteDuration(previewSeconds)} / {goal} นาที
             {!confirmed && " · รายการรอตรวจไม่นับยอด"}
           </p>
         )}
@@ -2977,6 +2980,7 @@ function CardioForm({ entry, close }: { entry?: Entry; close: () => void }) {
             {saving ? "กำลังบันทึก…" : "บันทึกและคำนวณยอด"}
           </button>
         </div>
+        </fieldset>
       </form>
       {ocr && (
         <OCRModal
@@ -3237,7 +3241,7 @@ export function BodyForm({
   entry?: Entry;
   close: () => void;
 }) {
-  const { run } = useData();
+  const { run, readOnly } = useData();
   const draft = useFormDraft("body", entry);
   const [revision, setRevision] = useState(0);
   const [photoId, setPhotoId] = useState<string | undefined>(draft.initial.photoId ?? entry?.data.photoId);
@@ -3252,7 +3256,7 @@ export function BodyForm({
   };
   usePastedImage(formRef, attach);
   return (
-    <Modal title="บันทึกผลวัดร่างกาย" close={close}>
+    <Modal title={readOnly ? "ผลวัดร่างกาย" : "บันทึกผลวัดร่างกาย"} close={close}>
       <form
         ref={formRef}
         key={revision}
@@ -3288,6 +3292,7 @@ export function BodyForm({
           }, "บันทึกผลวัดแล้ว");
         }}
       >
+        <fieldset className="form-lock" disabled={readOnly}>
         {Object.keys(draft.initial).length > 0 && (
           <div className="notice">
             เปิดแบบร่างที่กรอกค้างไว้แล้ว
@@ -3336,7 +3341,7 @@ export function BodyForm({
           <input name="reportUrl" type="url" placeholder="https://…" maxLength={2000}
             defaultValue={draft.initial.reportUrl ?? entry?.data.reportUrl ?? ""} />
         </Field>
-        <label className="secondary">
+        <label className="secondary edit-only">
           <ImagePlus size={18} />
           แนบผล InBody (หรือวางรูปที่คัดลอกไว้)
           <input
@@ -3352,6 +3357,7 @@ export function BodyForm({
           </div>
         )}
         <button className="primary">บันทึกผลวัด</button>
+        </fieldset>
       </form>
     </Modal>
   );
@@ -3465,7 +3471,7 @@ function HistoryPage() {
             <ChevronRight size={18} />
           </button>
           <button
-            className="icon"
+            className="icon edit-only"
             aria-label="ย้ายเข้าถังขยะ"
             onClick={() => run(() => trash(e.id), "ย้ายเข้าถังขยะแล้ว กู้คืนได้ในตั้งค่า")}
           >
@@ -3701,7 +3707,7 @@ function SettingsPage({
   viewJournal: (client: Client) => void;
   clients: Client[];
 }) {
-  const { entries, run, notify } = useData(),
+  const { entries, run, notify, readOnly } = useData(),
     [cfg, setCfg] = useState(config()),
     [importFile, setImportFile] = useState<Blob | null>(null),
     [preview, setPreview] = useState<Entry[]>([]),
@@ -3723,6 +3729,13 @@ function SettingsPage({
     setPreview(p.entries);
     setFuture(p.future.length);
   }
+  // These settings belong to the signed-in coach; while a client's journal is open only switching makes sense.
+  if (readOnly) return (
+    <>
+      <Header title="Settings" subtitle="กลับไปข้อมูลของฉันเพื่อแก้การตั้งค่า" />
+      <MyClients clients={clients} viewJournal={viewJournal} />
+    </>
+  );
   const showOwnerSettings = !cfg || profile?.role === "owner";
   const signOut = () => run(async () => {
     const result = await (await cloud())?.auth.signOut({ scope: "local" });
@@ -4079,7 +4092,56 @@ function SettingsPage({
     </>
   );
 }
-function SessionEditor({
+function SessionView({ source, close }: { source: Entry; close: () => void }) {
+  const { entries, run } = useData();
+  const session = source.data as Session;
+  const venues = sessionGyms(entries, session).map((gym) => gymName(entries, gym));
+  return (
+    <Modal title={session.title || "การฝึก"} close={close}>
+      <div className="form">
+        <p className="muted">
+          {[dateLabel(session.date), ...venues, session.status === "draft" && "กำลังฝึก"].filter(Boolean).join(" · ")}
+        </p>
+        {session.summary && <div className="notice preserve">{session.summary}</div>}
+        {session.source && <p className="muted">{session.source}</p>}
+        <div className="exercise-list">
+          {session.exercises.map((x, i) => {
+            const m = entries.find((e) => e.id === x.machineId)?.data as Machine | undefined;
+            const done = x.sets.filter((set) => set.done);
+            return (
+              <div className={`exercise-item ${done.length ? "done" : ""}`} key={x.machineId}>
+                <div className="exercise-open">
+                  <span className="exercise-thumb">
+                    <Photo id={m && machinePhotoIds(entries, x.machineId, m).main} alt={m?.name ?? "เครื่อง"} />
+                    <b>{i + 1}</b>
+                  </span>
+                  <span className="exercise-text">
+                    <strong>{m?.name ?? x.originalName ?? "ไม่ทราบเครื่อง"}</strong>
+                    {done.length ? done.map((set) => (
+                      <small className="ok" key={set.id}>{formatSet(set, x.loadMode)}{set.warmup && " (วอร์ม)"}</small>
+                    )) : <small>ยังไม่มีเซตที่ยืนยัน</small>}
+                    {x.setup && <small className="muted">{x.setup}</small>}
+                    {x.note && <small className="muted">{x.note}</small>}
+                    {m && x.originalName && x.originalName !== m.name && (
+                      <small className="muted">บันทึกเดิม: {x.originalName}</small>
+                    )}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        {session.note && <p className="preserve">{session.note}</p>}
+        <button className="secondary" onClick={() =>
+          run(() => navigator.clipboard.writeText(workoutMessage(session, entries)), "คัดลอกสรุปเวทแล้ว")}>
+          <Copy size={16} />
+          คัดลอกสรุปเวท
+        </button>
+      </div>
+    </Modal>
+  );
+}
+export function SessionEditor({
   id,
   close,
   focusMachine,
@@ -4088,8 +4150,9 @@ function SessionEditor({
   close: () => void;
   focusMachine?: string;
 }) {
-  const { entries } = useData();
+  const { entries, readOnly } = useData();
   const source = entries.find((e) => e.id === id);
+  if (source && readOnly) return <SessionView source={source} close={close} />;
   return source ? (
     <SessionEditorForm
       source={source}

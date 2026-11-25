@@ -57,7 +57,7 @@ export default function BodyProfile({ bodies, reports, openMetric, height }: {
       <section className="panel">
         <div className="section-title">
           <h2>สัดส่วนและไซส์เสื้อผ้า</h2>
-          <button className="secondary" onClick={() => setEditing(true)}>แก้ไขสัดส่วน</button>
+          <button className="secondary edit-only" onClick={() => setEditing(true)}>แก้ไขสัดส่วน</button>
         </div>
         {sizing?.date && <p className="muted">บันทึกสัดส่วน {dateLabel(sizing.date)}</p>}
         <dl className="body-details-grid">
@@ -126,8 +126,8 @@ export default function BodyProfile({ bodies, reports, openMetric, height }: {
           {[...links].map(([url, label]) => (
             <a key={url} className="secondary" href={url} target="_blank" rel="noreferrer">{label}</a>
           ))}
-          {measurements.map((entry) => <button key={entry.id} className="text-button" onClick={() => setBodyEdit(entry)}>แก้ไขผล / แนบลิงก์ PDF</button>)}
-          {!measurements.length && <button className="secondary" onClick={() => setBodyEdit(null)}>บันทึกผล / แนบลิงก์ PDF</button>}
+          {measurements.map((entry) => <button key={entry.id} className="text-button edit-only" onClick={() => setBodyEdit(entry)}>แก้ไขผล / แนบลิงก์ PDF</button>)}
+          {!measurements.length && <button className="secondary edit-only" onClick={() => setBodyEdit(null)}>บันทึกผล / แนบลิงก์ PDF</button>}
         </div>
       </section>
       {bodyEdit !== undefined && <BodyForm entry={bodyEdit ?? undefined} close={() => setBodyEdit(undefined)} />}
