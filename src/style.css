@@ -3003,3 +3003,7 @@ summary {
   margin: 0;
   text-align: right;
 }
+/* Recharts measures axis labels in this off-screen element; keep its text out of the readable page. */
+#recharts_measurement_span {
+  visibility: hidden;
+}
