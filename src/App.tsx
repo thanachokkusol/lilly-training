@@ -148,7 +148,7 @@ import WorkoutSummary, { MachineInsights, WorkoutNumbers } from "./WorkoutSummar
 import { CatalogDetail, CatalogSearch, HowTo, ImageCredit, catalogImageUrl, useCatalog } from "./ExerciseLibrary";
 import { equipmentLabels, matchesExercise, noGym, searchCatalog, type CatalogItem } from "./catalog";
 import { catalogLinks } from "./catalogLinks";
-import { identifiedJettMachine, isPendingMachine, jettIdentification } from "./pendingMachines";
+import { identifiedJettMachine, isPendingMachine, jettIdentification, withoutDuplicateJettCards } from "./pendingMachines";
 import { catalogIdOf, categoryLabel, categoryOf, legacyGroup, legMuscles, muscleIds, muscleLabels, musclesFor, muscleText, stretchCategory } from "./muscles";
 import { kg, recordLabels, sessionSets, sessionVolume, setRecords, setsBefore, previousExercise, warmupSets } from "./workoutStats";
 type Context = {
@@ -1600,10 +1600,11 @@ function exerciseCards(entries: Entry[], machines: Entry[], combineCatalog = fal
 
 function machineVariants(entries: Entry[], machine: Machine, includeCatalog = false) {
   const catalogId = includeCatalog ? catalogIdOf(machine) : undefined;
-  return entries.filter((e) =>
+  const variants = entries.filter((e) =>
     e.kind === "machine" && !e.deleted && !e.data.archived && !isPendingMachine(e) &&
     (exerciseKey(e.data) === exerciseKey(machine) || (catalogId && catalogIdOf(e.data) === catalogId)),
   );
+  return includeCatalog ? withoutDuplicateJettCards(variants) : variants;
 }
 
 function MachineCover({ entry, entries }: { entry: Entry; entries: Entry[] }) {
@@ -1640,9 +1641,9 @@ function MachineTile({ e, category = categoryOf(e.data), onClick }: { e: Entry; 
   return (
     <StrengthTile name={m.name} thai={thai} group={categoryLabel(category)} location={gymName(entries, m.gym)} onClick={onClick}
       photo={<MachineCover entry={e} entries={entries} />}>
-        <p className="muted">
+        {m.gym !== "Jett" && <p className="muted">
           มีเครื่องที่: {[...new Set(machineVariants(entries, m, true).map((x) => gymName(entries, x.data.gym)))].join(" · ")}
-        </p>
+        </p>}
         <div className="last-load">
           {last ? (
             <>
@@ -1686,7 +1687,7 @@ function Machines() {
   }
   const items = useCatalog();
   const byId = new Map(items?.map((item) => [item.id, item]));
-  const available = entries.filter((e) => e.kind === "machine" && !e.deleted && !isPendingMachine(e));
+  const available = withoutDuplicateJettCards(entries.filter((e) => e.kind === "machine" && !e.deleted && !isPendingMachine(e)));
   const assigned = new Set(available.filter((e) => !e.data.archived || showArchived).map((e) => catalogIdOf(e.data)));
   const categories = [...muscleIds, stretchCategory];
   const group = savedGroup ?? "ทั้งหมด";
@@ -1817,7 +1818,7 @@ function MachineDetail({ id, close, selectMachine }: {
     if (cloudVersion) void machineEditor(id).then((found) => { if (live) setEditor(found); });
     return () => { live = false; };
   }, [id, cloudVersion]);
-  const guide = e ? exerciseGuide(e.data.name) : undefined;
+  const guide = e && e.data.gym !== "Jett" ? exerciseGuide(e.data.name) : undefined;
   const hasBundledPhotos = !guide || exerciseGuideFrames(guide).every((frame) =>
     entries.some((item) => item.id === `guide-photo-${id}-${frame}`),
   );
@@ -1900,10 +1901,10 @@ function MachineDetail({ id, close, selectMachine }: {
   return (
     <Modal title={m.name} close={close}>
       <div className="chips" aria-label="เลือกเครื่อง">
-        {machineVariants(entries, m, true).map((variant) => (
+        {(m.gym === "Jett" ? [e] : machineVariants(entries, m, true)).map((variant) => (
           <button key={variant.id} className={variant.id === id ? "selected" : ""}
             aria-pressed={variant.id === id} onClick={() => selectMachine(variant.id)}>
-            {gymName(entries, variant.data.gym)}{variant.data.label ? ` · ${variant.data.label}` :
+            {gymName(entries, variant.data.gym)}{m.gym === "Jett" ? "" : variant.data.label ? ` · ${variant.data.label}` :
               exerciseKey(variant.data) !== exerciseKey(m) ? ` · ${variant.data.name}` : ""}
           </button>
         ))}

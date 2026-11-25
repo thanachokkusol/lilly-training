@@ -9,7 +9,9 @@ export function machinePhotoIds(entries: Entry[], machineId: string, machine: Ma
     e.kind === "machine" && !e.deleted && e.data.gym === "Jett" && e.data.photoId ? [e.data.photoId] : [],
   ));
   const belongs = (id: string) =>
-    machine.gym === "Jett" || (!id.startsWith("photo-jett-") && !jettPhotos.has(id));
+    machine.gym === "Jett"
+      ? !id.startsWith("guide-photo-")
+      : !id.startsWith("photo-jett-") && !jettPhotos.has(id);
   const photos = entries.filter((e) => e.kind === "photo" && !e.deleted && belongs(e.id) &&
     (e.data.machineId === machineId || e.id === machine.photoId || e.id === machine.referencePhotoId ||
       e.id === `photo-${machineId}` ||

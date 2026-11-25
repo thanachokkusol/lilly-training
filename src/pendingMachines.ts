@@ -18,3 +18,13 @@ export function identifiedJettMachine(entry: Entry) {
   if (!identification || !isPendingMachine(entry) || entry.deleted || entry.data.gym !== "Jett") return;
   return { ...entry.data, ...identification, exerciseId: entry.id };
 }
+
+/** Prefer the identified PDF machine when an older Jett card has the same name. */
+export function withoutDuplicateJettCards(machines: Entry[]) {
+  const confirmed = new Set(machines.filter((entry) =>
+    entry.data.gym === "Jett" && !entry.data.archived && jettIdentification(entry.id) &&
+    entry.data.catalogId === jettIdentification(entry.id)?.catalogId,
+  ).map((entry) => entry.data.name.trim().toLowerCase()));
+  return machines.filter((entry) => entry.data.gym !== "Jett" || jettIdentification(entry.id) ||
+    !confirmed.has(entry.data.name.trim().toLowerCase()));
+}

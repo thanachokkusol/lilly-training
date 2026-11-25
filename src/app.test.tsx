@@ -353,11 +353,16 @@ it("uses the original machine card for a matching catalog move in all locations"
   fireEvent.click(screen.getByRole("heading", { name: "Chest Press" }));
   expect((await topDialog()).getByText("เบาะระดับ 6")).toBeTruthy();
 });
-it("applies the Jett identifications without collapsing cards that match the same catalog move", async () => {
+it("shows the identified Jett machine once, with its own photo and without cross-gym shortcuts", async () => {
   const data = { name: "เครื่อง Jett หน้า 3 · รอยืนยันชื่อ", thai: "", gym: "Jett",
     group: "อื่น ๆ", setup: "", cues: "", loadMode: "total", photoId: "photo-jett-extra-3" };
   await save("machine", data, "jett-extra-3");
-  await save("machine", { ...data, name: "Abdominal Crunch", photoId: undefined }, "jett-crunch");
+  const other = { ...data, name: "Abdominal Crunch", photoId: "photo-legacy-crunch" };
+  await save("machine", other, "jett-crunch");
+  await save("machine", { ...other, gym: "WE Fitness" }, "we-crunch");
+  await save("photo", { label: "", mime: "image/jpeg", machineId: "jett-extra-3" }, data.photoId);
+  await save("photo", { label: "", mime: "image/jpeg", machineId: "jett-crunch" }, other.photoId);
+  await save("photo", { label: "ภาพประกอบ", mime: "image/jpeg", machineId: "jett-extra-3" }, "guide-photo-jett-extra-3-0");
   location.hash = "#settings";
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: "ใช้ชื่อที่ระบุสำหรับเครื่อง Jett" }));
@@ -366,7 +371,16 @@ it("applies the Jett identifications without collapsing cards that match the sam
     .toEqual({ ...data, name: "Abdominal Crunch", catalogId: "EB43ADD4", exerciseId: "jett-extra-3" });
   fireEvent.click(screen.getAllByRole("button", { name: "Strength" })[0]);
   fireEvent.change(await screen.findByLabelText("ฟิตเนส"), { target: { value: "Jett" } });
-  expect(screen.getAllByRole("heading", { name: "Abdominal Crunch" })).toHaveLength(2);
+  expect(screen.getAllByRole("heading", { name: "Abdominal Crunch" })).toHaveLength(1);
+  fireEvent.click(screen.getByRole("heading", { name: "Abdominal Crunch" }));
+  const detail = await topDialog();
+  const places = within(detail.getByLabelText("เลือกเครื่อง"));
+  expect(places.getByRole("button", { name: "Jett" })).toBeTruthy();
+  expect(places.queryByRole("button", { name: /WE Fitness|Jett ·/ })).toBeNull();
+  expect(detail.getAllByRole("button", { name: "รูปหลัก" })).toHaveLength(1);
+  expect(detail.queryByRole("button", { name: "เปิดรูปเครื่อง" })).toBeNull();
+  expect(detail.queryByRole("button", { name: "รูปถัดไป" })).toBeNull();
+  expect((await allEntries()).find((entry) => entry.id === "jett-crunch")?.data).toEqual(other);
 });
 it("removes an unused gym from every list but never one with history", async () => {
   const machine = { name: "Old Press", thai: "", group: "อก", setup: "", cues: "", loadMode: "total" };
