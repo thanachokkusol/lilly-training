@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import "fake-indexeddb/auto";
+import "./test-fresh-idb";
 import { it, expect, vi, afterEach } from "vitest";
 import {
   render,
@@ -8,12 +8,15 @@ import {
   waitFor,
   cleanup,
   within,
+  configure,
 } from "@testing-library/react";
 import App from "./App";
 import TrainingCalendar from "./TrainingCalendar";
 import { save, allEntries } from "./db";
 import { dateLabel, today, weekOf } from "./core";
 vi.stubGlobal("scrollTo", () => {});
+// The full suite runs files in parallel; on this machine a render can take just over the 1s default.
+configure({ asyncUtilTimeout: 5000 });
 // UI fixtures use their own fake IndexedDB, never this machine's cloud project.
 vi.stubEnv("VITE_SUPABASE_URL", "");
 vi.stubEnv("VITE_SUPABASE_PUBLISHABLE_KEY", "");

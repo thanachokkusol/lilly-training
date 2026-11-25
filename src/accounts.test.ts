@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import "fake-indexeddb/auto";
+import "./test-fresh-idb";
 import { describe, it, expect } from "vitest";
 import { loginEmail } from "./cloud";
 import { save, setReadOnly, trash } from "./db";
