@@ -170,7 +170,9 @@ export function exerciseGuide(name: string) {
 }
 
 export function exerciseGuideFrames(guide: string) {
-  return ["Kettlebell_Upright_Row", "Wall_Chest_Stretch_Elbow", "Doorway_Chest_Stretch", "Wall_Chest_Stretch_Straight", "Kneeling_Hip_Flexor", "Side_Lying_Quad_Stretch",
+  // Frame 0 of these two was a wrong drawing; new numbers replace copies already saved as photos.
+  if (["Doorway_Chest_Stretch", "Wall_Chest_Stretch_Straight"].includes(guide)) return [1, 2];
+  return ["Kettlebell_Upright_Row", "Wall_Chest_Stretch_Elbow", "Kneeling_Hip_Flexor", "Side_Lying_Quad_Stretch",
     "Seated_Floor_Hamstring_Stretch", "Ankle_On_The_Knee", "Calf_Stretch_Hands_Against_Wall", "Childs_Pose"]
     .includes(guide) ? [0] : [0, 1];
 }

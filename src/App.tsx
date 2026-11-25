@@ -1517,10 +1517,11 @@ function machineVariants(entries: Entry[], machine: Machine) {
 function MachineCover({ entry, entries }: { entry: Entry; entries: Entry[] }) {
   const m = entry.data as Machine;
   const coverPhoto = machinePhotoIds(entries, entry.id, m).main;
-  const guide = m.gym === homeGym &&
-    !entries.some((item) => item.id === `guide-photo-${entry.id}-0`) ? exerciseGuide(m.name) : undefined;
-  return guide && !coverPhoto
-    ? <img loading="lazy" src={`${import.meta.env.BASE_URL}exercise-guides/${guide}/0.jpg`} alt={`ภาพประกอบ ${m.name}`} />
+  const guide = m.gym === homeGym ? exerciseGuide(m.name) : undefined;
+  const frame = guide ? exerciseGuideFrames(guide)[0] : 0;
+  const replaced = coverPhoto === `guide-photo-${entry.id}-0` && frame !== 0;
+  return guide && (replaced || (!coverPhoto && !entries.some((item) => item.id === `guide-photo-${entry.id}-${frame}`)))
+    ? <img loading="lazy" src={`${import.meta.env.BASE_URL}exercise-guides/${guide}/${frame}.jpg`} alt={`ภาพประกอบ ${m.name}`} />
     : <Photo id={coverPhoto} alt={m.name} />;
 }
 
@@ -1779,7 +1780,7 @@ function MachineDetail({ id, close, selectMachine }: {
           if (next) setPreviewId(next.id);
         }}>
         {!shown && guide && !hasBundledPhotos ? (
-          <img src={`${import.meta.env.BASE_URL}exercise-guides/${guide}/0.jpg`} alt={m.name} />
+          <img src={`${import.meta.env.BASE_URL}exercise-guides/${guide}/${exerciseGuideFrames(guide)[0]}.jpg`} alt={m.name} />
         ) : <Photo id={shown} alt={m.name} />}
       </div>
       {photos.length > 1 && (

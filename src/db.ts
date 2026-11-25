@@ -90,6 +90,9 @@ export async function addBundledMachinePhotos(machineId: string, name: string, g
       data: { machineId, label: name, mime: "image/jpeg" },
     });
   }
+  const retired = await records.get(`guide-photo-${machineId}-0`) as Entry | undefined;
+  if (retired && !retired.deleted && !exerciseGuideFrames(guide).includes(0))
+    await records.put({ ...retired, deleted: true, dirty: true, updatedAt: new Date().toISOString() });
   await tx.done;
 }
 export async function addMissingHomeTraining(obsoleteId?: string) {
