@@ -206,11 +206,13 @@ function Photo({
   const revision = entries.find(
     (e) => e.id === id && e.kind === "photo",
   );
+  const path = revision?.data?._photoPath;
+  const version = revision?.version;
+  const updatedAt = revision?.updatedAt;
   useEffect(() => {
     let alive = true,
       url = "";
     setSrc("");
-    const path = revision?.data?._photoPath;
     if (id)
       photoBlob(id).then(async (local) => {
         const b = local ?? (path ? await remotePhoto(path) : undefined);
@@ -223,7 +225,7 @@ function Photo({
       alive = false;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [id, revision]);
+  }, [id, path, version, updatedAt]);
   return src ? (
     <img className={className} src={src} alt={alt} />
   ) : (
@@ -3716,13 +3718,22 @@ function SettingsPage({
     setPreview(p.entries);
     setFuture(p.future.length);
   }
+  const showOwnerSettings = !cfg || profile?.role === "owner";
+  const signOut = () => run(async () => {
+    if (entries.some((entry) => entry.dirty))
+      notify("รายการรอซิงก์ยังอยู่ในเครื่อง จะส่งเมื่อกลับเข้าบัญชีเดิม");
+    localStorage.setItem("lilly-locked", "true");
+    const result = await (await cloud())?.auth.signOut({ scope: "local" });
+    if (result?.error) throw result.error;
+    setUser("");
+  }, "ออกจากระบบแล้ว");
   return (
     <>
       <Header
         title="Settings"
-        subtitle="การซิงก์ เป้าหมาย โปรแกรมฝึก และการสำรองข้อมูล"
+        subtitle={showOwnerSettings ? "การซิงก์ เป้าหมาย โปรแกรมฝึก และการสำรองข้อมูล" : undefined}
       />
-      <section className="panel">
+      {showOwnerSettings && <section className="panel">
         <div className="section-title">
           <div>
             <h2>การซิงก์ส่วนตัว</h2>
@@ -3758,21 +3769,7 @@ function SettingsPage({
           {user && (
             <button
               className="text-button"
-              onClick={() =>
-                run(async () => {
-                  const pending = entries.some((e) => e.dirty);
-                  if (pending)
-                    notify("รายการรอซิงก์ยังอยู่ในเครื่อง จะส่งเมื่อกลับเข้าบัญชีเดิม");
-                  localStorage.setItem("lilly-locked", "true");
-                  const result = await (
-                    await cloud()
-                  )?.auth.signOut({
-                    scope: "local",
-                  });
-                  if (result?.error) throw result.error;
-                  setUser("");
-                }, "ออกจากระบบแล้ว")
-              }
+              onClick={signOut}
             >
               ออกจากระบบ
             </button>
@@ -3782,10 +3779,9 @@ function SettingsPage({
           ข้อมูลและรูปส่วนตัวอยู่ในฐานข้อมูล ไม่อยู่ในโค้ด GitHub · รอซิงก์{" "}
           {entries.filter((e) => e.dirty).length} รายการ
         </p>
-      </section>
+      </section>}
       <RoutineSettings />
-      <GymSettings />
-      <ReviewedSessionMigration />
+      {showOwnerSettings && <><GymSettings /><ReviewedSessionMigration /></>}
       {profile && (
         <section className="panel">
           <div className="section-title">
@@ -3797,11 +3793,12 @@ function SettingsPage({
               </p>
             </div>
             <ChangePassword profile={profile} />
+            {!showOwnerSettings && <button className="text-button" onClick={signOut}>ออกจากระบบ</button>}
           </div>
         </section>
       )}
       {profile?.role === "owner" && <TrainerAccounts viewJournal={viewJournal} />}
-      <RestShortcutSettings />
+      {showOwnerSettings && <RestShortcutSettings />}
       <section className="panel">
         <h2>เป้าหมายรายสัปดาห์</h2>
         <form
@@ -3852,7 +3849,7 @@ function SettingsPage({
           <button className="secondary">บันทึกเป้าหมาย</button>
         </form>
       </section>
-      <section className="panel">
+      {showOwnerSettings && <><section className="panel">
         <h2>สำรองข้อมูล</h2>
         <p className="muted">
           ZIP รวมข้อมูลและรูปทั้งหมด · CSV สำหรับเปิดใน Excel / Google Sheets
@@ -3962,7 +3959,7 @@ function SettingsPage({
         {!entries.some((e) => e.deleted) && (
           <p className="muted">ไม่มีรายการในถังขยะ</p>
         )}
-      </section>
+      </section></>}
       {configOpen && (
         <Modal title="เชื่อม Supabase" close={() => setConfigOpen(false)}>
           <form

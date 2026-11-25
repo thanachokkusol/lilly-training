@@ -166,6 +166,22 @@ describe.sequential("database access controls and optimistic writes", () => {
     await identity(owner);
     expect((await db.query("select id from public.training_records where id='friend-cardio'")).rows).toHaveLength(1);
   });
+  it("shares the legacy Jett machine photo without sharing owner evidence", async () => {
+    await identity(owner);
+    await db.query(`select * from public.save_training_record('jett-row','machine','{"gym":"Jett","photoId":"photo-jett-ref-row"}',0,false)`);
+    await db.query(`select * from public.save_training_record('photo-jett-ref-row','photo','{"label":"legacy Jett"}',0,false)`);
+    await db.exec(`insert into storage.objects values ('jett-legacy','training-photos','${owner}/photo-jett-ref-row.jpg')`);
+    await identity(other);
+    expect((await db.query("select id from storage.objects where id='jett-legacy'")).rows).toHaveLength(0);
+    await db.exec("reset role");
+    const migration = readFileSync("supabase/migrations/20261125_share_legacy_jett_machine_photos.sql", "utf-8");
+    await db.exec(migration);
+    await db.exec(migration);
+    await identity(other);
+    expect((await db.query("select id from storage.objects order by id")).rows).toEqual([{ id: "jett-legacy" }]);
+    expect((await db.query("select version from public.training_records where id='photo-jett-ref-row'")).rows)
+      .toEqual([{ version: 2 }]);
+  });
   it("unauthenticated clients have no table access or save function access", async () => {
     await db.exec(`reset role;set app.uid='';set role anon;`);
     await expect(

@@ -166,7 +166,7 @@ export async function sync(onRecordsReady?: () => Promise<void>) {
     for (;;) {
       const query = c
         .from("training_records")
-        .select("id,kind,payload,version,deleted,updated_at")
+        .select("id,kind,payload,version,deleted,updated_at,user_id")
         .or(`user_id.eq.${user.id},shared.eq.true`)
         .order("id")
         .limit(500);
@@ -175,15 +175,18 @@ export async function sync(onRecordsReady?: () => Promise<void>) {
       for (const row of data ?? []) {
         const current = await getEntry(row.id);
         if (current?.dirty || current?.conflict) continue;
+        const data = row.kind === "photo" && !row.deleted
+          ? { ...row.payload, _photoPath: row.payload._photoPath ?? `${row.user_id}/${row.id}.jpg` }
+          : row.payload;
         const unchanged = current && current.version === row.version && current.kind === row.kind &&
-          !!current.deleted === row.deleted;
+          !!current.deleted === row.deleted && current.data._photoPath === data._photoPath;
         if (!unchanged) validateEntry({ id: row.id, kind: row.kind, data: row.payload });
         if (row.kind === "photo" && !row.deleted) {
-          if (current && current.data._photoPath !== row.payload._photoPath)
+          if (current && current.data._photoPath && current.data._photoPath !== data._photoPath)
             await clearPhotoBlob(row.id);
           if (!(await photoBlob(row.id))) photos.push({
             id: row.id,
-            path: row.payload._photoPath ?? `${user.id}/${row.id}.jpg`,
+            path: data._photoPath,
             version: row.version,
           });
         }
@@ -191,7 +194,7 @@ export async function sync(onRecordsReady?: () => Promise<void>) {
         await putEntry({
           id: row.id,
           kind: row.kind,
-          data: row.payload,
+          data,
           version: row.version,
           updatedAt: row.updated_at,
           dirty: false,
@@ -204,20 +207,25 @@ export async function sync(onRecordsReady?: () => Promise<void>) {
     }
     await onRecordsReady?.();
     let missingPhotos = 0;
-    for (const photo of photos) {
-      try {
-        const { data: blob, error } = await c.storage.from("training-photos").download(photo.path);
-        if (error || !blob) {
+    let nextPhoto = 0;
+    const fetchPhotos = async () => {
+      while (nextPhoto < photos.length) {
+        const photo = photos[nextPhoto++];
+        try {
+          const blob = await remotePhoto(photo.path);
+          if (!blob) {
+            missingPhotos++;
+            continue;
+          }
+          const entry = await getEntry(photo.id);
+          if (entry?.version === photo.version && !entry.dirty && !entry.deleted)
+            await storePhoto(photo.id, blob);
+        } catch {
           missingPhotos++;
-          continue;
         }
-        const entry = await getEntry(photo.id);
-        if (entry?.version === photo.version && !entry.dirty && !entry.deleted)
-          await storePhoto(photo.id, blob);
-      } catch {
-        missingPhotos++;
       }
-    }
+    };
+    await Promise.all(Array.from({ length: Math.min(4, photos.length) }, fetchPhotos));
     return { pushed, pulled, conflicts, missingPhotos };
   } finally {
     syncing = false;
@@ -306,12 +314,17 @@ export async function fetchUserRecords(userId: string): Promise<Entry[]> {
   return out;
 }
 /** Photo of a record not stored on this device (e.g. a client's evidence). */
+const pendingPhotos = new Map<string, Promise<Blob | undefined>>();
 export function remotePhoto(path: string) {
-  return cloud().then(async (c) => {
+  const active = pendingPhotos.get(path);
+  if (active) return active;
+  const request = cloud().then(async (c) => {
     if (!c) return undefined;
     const { data } = await c.storage.from("training-photos").download(path);
     return data ?? undefined;
-  }).catch(() => undefined);
+  }).catch(() => undefined).finally(() => pendingPhotos.delete(path));
+  pendingPhotos.set(path, request);
+  return request;
 }
 export async function trainerAdmin(body: Record<string, unknown>) {
   const c = await cloud();
