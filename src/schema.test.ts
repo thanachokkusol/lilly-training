@@ -144,6 +144,17 @@ describe.sequential("database access controls and optimistic writes", () => {
       db.query(`select * from public.save_training_record('z','body','{}',0,false)`),
     ).rejects.toThrow("Unauthorized");
   });
+  it("members rename only themselves", async () => {
+    await identity(owner);
+    await db.query(`select public.set_my_display_name('ธนโชค')`);
+    await db.exec("reset role");
+    expect(
+      (await db.query<any>(`select display_name, role from public.profiles where id='${owner}'`)).rows[0],
+    ).toEqual({ display_name: "ธนโชค", role: "owner" });
+    await db.exec(`set app.uid='';set role anon;`);
+    await expect(db.query(`select public.set_my_display_name('x')`)).rejects.toThrow();
+    await db.exec("reset role");
+  });
   it("re-running the schema keeps existing records and sharing", async () => {
     await db.exec("reset role");
     await db.exec(readFileSync("supabase/schema.sql", "utf-8"));

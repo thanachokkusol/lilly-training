@@ -59,7 +59,6 @@ import {
   importBackup,
   inspectBackup,
   download,
-  mergeExerciseGroups,
   moveReviewedSession,
   moveMachinePhoto,
   addMissingHomeTraining,
@@ -107,7 +106,7 @@ import {
   type Client,
 } from "./cloud";
 import { setReadOnly } from "./db";
-import { TrainerAccounts, ChangePassword } from "./Accounts";
+import { TrainerAccounts, ChangePassword, EditDisplayName } from "./Accounts";
 import PasswordInput from "./PasswordInput";
 /** Common equipment and programs; everything else belongs to one person. */
 const isSharedEntry = (e: Entry) =>
@@ -673,7 +672,7 @@ export default function App() {
         notify,
       }}
     >
-      <div className="app">
+      <div className={`app${viewing ? " viewing" : ""}`}>
         <aside className="sidebar">
           <a className="brand" href="#today">
             <span className="brand-mark">
@@ -1510,7 +1509,6 @@ function Machines() {
     [savedGroup, setGroup] = useRememberedView("strength-category", "ทั้งหมด"),
     [selected, setSelected] = useRememberedView("machine-detail"),
     [create, setCreate] = useState(false),
-    [merge, setMerge] = useState(false),
     [showArchived, setShowArchived] = useState(false);
   const group = savedGroup ?? "ทั้งหมด";
   const machines = entries.filter(
@@ -1527,7 +1525,6 @@ function Machines() {
   return (
     <>
       <Header title="Strength">
-        <button className="secondary" onClick={() => setMerge(true)}>รวมท่า</button>
         <button className="primary" onClick={() => setCreate(true)}>
           <Plus size={18} />
           เพิ่มเครื่อง / ท่า
@@ -1585,7 +1582,6 @@ function Machines() {
         <MachineDetail key={selected} id={selected} close={() => setSelected(null)} selectMachine={setSelected} />
       )}{" "}
       {create && <MachineForm close={() => setCreate(false)} />}
-      {merge && <MergeExercises close={() => setMerge(false)} />}
     </>
   );
 }
@@ -1931,38 +1927,6 @@ function MachineDetail({ id, close, selectMachine }: {
     </Modal>
   );
 }
-function MergeExercises({ close }: { close: () => void }) {
-  const { entries, run } = useData();
-  const [source, setSource] = useState("");
-  const [target, setTarget] = useState("");
-  const choices = exerciseCards(entries, entries.filter((e) => e.kind === "machine" && !e.deleted));
-  return (
-    <Modal title="รวมท่า" close={close}>
-      <form className="form" onSubmit={(event) => {
-        event.preventDefault();
-        void run(async () => {
-          await mergeExerciseGroups(source, target);
-          close();
-        }, "รวมท่าแล้ว");
-      }}>
-        <p>เครื่อง รูป และเซ็ตของทั้งสองท่าจะอยู่ในการ์ดชื่อที่เลือกเก็บ</p>
-        {([
-          ["ท่าที่จะรวม", source, setSource],
-          ["ชื่อท่าที่จะเก็บ", target, setTarget],
-        ] as const).map(([label, value, setValue]) => (
-          <Field key={label} label={label}>
-            <select value={value} required onChange={(e) => setValue(e.target.value)}>
-              <option value="">เลือกท่า</option>
-              {choices.map((m) => <option key={m.id} value={exerciseKey(m.data)}>{m.data.name}</option>)}
-            </select>
-          </Field>
-        ))}
-        <button className="primary" disabled={!source || !target || source === target}>ยืนยันรวมท่า</button>
-      </form>
-    </Modal>
-  );
-}
-
 function normalizedExerciseName(value: string) {
   return value.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{M}\p{N}]+/gu, "");
 }
@@ -3792,6 +3756,7 @@ function SettingsPage({
                 {profile.role === "owner" ? "เจ้าของสมุด" : profile.role === "trainer" ? "เทรนเนอร์" : "เพื่อน"}
               </p>
             </div>
+            <EditDisplayName profile={profile} />
             <ChangePassword profile={profile} />
             {!showOwnerSettings && <button className="text-button" onClick={signOut}>ออกจากระบบ</button>}
           </div>

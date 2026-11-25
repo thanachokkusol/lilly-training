@@ -353,3 +353,10 @@ export async function changeOwnPassword(current: string, next: string) {
   const { error } = await c.auth.updateUser({ password: next });
   if (error) throw error;
 }
+export async function setMyDisplayName(name: string) {
+  const c = await cloud();
+  if (!c) throw Error("ยังไม่ได้เชื่อม Supabase");
+  const { error } = await c.rpc("set_my_display_name", { new_name: name.trim() });
+  if (error) throw Error(/Invalid/.test(error.message) ? "ชื่อต้องยาว 1–80 ตัวอักษร" : error.message);
+  if (signedInProfile) signedInProfile = { ...signedInProfile, displayName: name.trim() };
+}

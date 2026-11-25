@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { changeOwnPassword, trainerAdmin, type Profile } from "./cloud";
+import { changeOwnPassword, setMyDisplayName, trainerAdmin, type Profile } from "./cloud";
 import { Modal, useData } from "./App";
 import PasswordInput from "./PasswordInput";
 
@@ -211,6 +211,39 @@ export function ChangePassword({ profile }: { profile: Profile }) {
               <PasswordInput name="again" required minLength={8} maxLength={72} autoComplete="new-password" />
             </label>
             <button className="primary">เปลี่ยนรหัสผ่าน</button>
+          </form>
+        </Modal>
+      )}
+    </>
+  );
+}
+
+export function EditDisplayName({ profile }: { profile: Profile }) {
+  const { run } = useData();
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button className="text-button" onClick={() => setOpen(true)}>
+        เปลี่ยนชื่อที่แสดง
+      </button>
+      {open && (
+        <Modal title="ชื่อที่แสดง" close={() => setOpen(false)}>
+          <form
+            className="form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const f = new FormData(e.currentTarget);
+              void run(async () => {
+                await setMyDisplayName(String(f.get("name")));
+                setOpen(false);
+              }, "บันทึกชื่อแล้ว โค้ชจะเห็นชื่อนี้หลังเปิดเว็บใหม่");
+            }}
+          >
+            <label className="field">
+              <span>ชื่อที่โค้ชและเพื่อนจะเห็น</span>
+              <input name="name" required maxLength={80} defaultValue={profile.displayName.includes("@") ? "" : profile.displayName} />
+            </label>
+            <button className="primary">บันทึก</button>
           </form>
         </Modal>
       )}

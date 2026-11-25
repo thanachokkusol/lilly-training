@@ -156,6 +156,17 @@ drop policy if exists training_photo_update on storage.objects;
 create policy training_photo_update on storage.objects for update to authenticated using(bucket_id='training-photos' and (storage.foldername(name))[1]=auth.uid()::text and public.is_training_owner()) with check(bucket_id='training-photos' and (storage.foldername(name))[1]=auth.uid()::text and public.is_training_owner());
 
 -- Give the existing owner a profile so trainers see a display name.
+-- Members may rename themselves; nothing else in a profile is self-editable.
+create or replace function public.set_my_display_name(new_name text) returns void language plpgsql security definer set search_path = '' as $$
+begin
+ if auth.uid() is null or not public.is_training_owner() then raise exception 'Unauthorized'; end if;
+ if length(trim(new_name)) = 0 or length(new_name) > 80 then raise exception 'Invalid name'; end if;
+ insert into public.profiles(id, role, display_name) values (auth.uid(), public.journal_role(), trim(new_name))
+  on conflict (id) do update set display_name = trim(new_name);
+end; $$;
+revoke all on function public.set_my_display_name(text) from public, anon;
+grant execute on function public.set_my_display_name(text) to authenticated;
+
 insert into public.profiles(id, role, display_name)
  select user_id, 'owner', '' from public.training_owners on conflict (id) do nothing;
 
