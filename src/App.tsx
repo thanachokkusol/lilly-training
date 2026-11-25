@@ -148,7 +148,7 @@ import WorkoutSummary, { MachineInsights, WorkoutNumbers } from "./WorkoutSummar
 import { CatalogDetail, CatalogSearch, HowTo, ImageCredit, catalogImageUrl, useCatalog } from "./ExerciseLibrary";
 import { equipmentLabels, matchesExercise, noGym, searchCatalog, type CatalogItem } from "./catalog";
 import { catalogLinks } from "./catalogLinks";
-import { isPendingMachine } from "./pendingMachines";
+import { identifiedJettMachine, isPendingMachine, jettIdentification } from "./pendingMachines";
 import { catalogIdOf, categoryLabel, categoryOf, legacyGroup, legMuscles, muscleIds, muscleLabels, musclesFor, muscleText, stretchCategory } from "./muscles";
 import { kg, recordLabels, sessionSets, sessionVolume, setRecords, setsBefore, previousExercise, warmupSets } from "./workoutStats";
 type Context = {
@@ -1583,7 +1583,8 @@ function exerciseCards(entries: Entry[], machines: Entry[], combineCatalog = fal
   const byExercise = new Map<string, { machine: Entry; date: string }>();
   for (const machine of machines) {
     const catalogId = combineCatalog ? catalogIdOf(machine.data) : undefined;
-    const key = catalogId ? `catalog:${catalogId}` : exerciseKey(machine.data);
+    const key = combineCatalog && jettIdentification(machine.id) ? `machine:${machine.id}` :
+      catalogId ? `catalog:${catalogId}` : exerciseKey(machine.data);
     const last = latestExercise(entries, machine.id, today())?.entry;
     const date = last ? `${last.data.date}/${last.updatedAt}` : "";
     const current = byExercise.get(key);
@@ -4040,12 +4041,22 @@ function ReviewedSessionMigration() {
 }
 
 function PendingMachines() {
-  const { entries } = useData();
+  const { entries, run } = useData();
+  const [applying, setApplying] = useState(false);
   const pending = entries.filter((entry) => !entry.deleted && isPendingMachine(entry))
     .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
   return pending.length > 0 && (
     <section className="panel">
       <h2>เครื่อง Jett ที่รอตอบ</h2>
+      {pending.some(identifiedJettMachine) && <button className="secondary" disabled={applying} onClick={() => {
+        setApplying(true);
+        void run(async () => {
+          for (const entry of await allEntries()) {
+            const machine = identifiedJettMachine(entry);
+            if (machine) await save("machine", machine, entry.id);
+          }
+        }, "บันทึกชื่อเครื่อง Jett แล้ว").finally(() => setApplying(false));
+      }}>ใช้ชื่อที่ระบุสำหรับเครื่อง Jett</button>}
       <div className="machine-grid">
         {pending.map((entry) => <PendingMachineQuestion key={entry.id} entry={entry} />)}
       </div>
@@ -4062,6 +4073,7 @@ function PendingMachineQuestion({ entry }: { entry: Entry }) {
     <article className="panel pending-machine">
       <div className="machine-photo"><MachineCover entry={entry} entries={entries} /></div>
       <h3>{entry.data.name}</h3>
+      {identifiedJettMachine(entry) && <p className="muted">{jettIdentification(entry.id)?.name}</p>}
       {!open ? <button className="secondary" onClick={() => setOpen(true)}>เลือกท่าจากรายการ</button> :
         <form className="form" onSubmit={(event) => {
           event.preventDefault();

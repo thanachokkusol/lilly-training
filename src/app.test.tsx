@@ -353,6 +353,21 @@ it("uses the original machine card for a matching catalog move in all locations"
   fireEvent.click(screen.getByRole("heading", { name: "Chest Press" }));
   expect((await topDialog()).getByText("เบาะระดับ 6")).toBeTruthy();
 });
+it("applies the Jett identifications without collapsing cards that match the same catalog move", async () => {
+  const data = { name: "เครื่อง Jett หน้า 3 · รอยืนยันชื่อ", thai: "", gym: "Jett",
+    group: "อื่น ๆ", setup: "", cues: "", loadMode: "total", photoId: "photo-jett-extra-3" };
+  await save("machine", data, "jett-extra-3");
+  await save("machine", { ...data, name: "Abdominal Crunch", photoId: undefined }, "jett-crunch");
+  location.hash = "#settings";
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "ใช้ชื่อที่ระบุสำหรับเครื่อง Jett" }));
+  await waitFor(() => expect(screen.queryByRole("heading", { name: "เครื่อง Jett ที่รอตอบ" })).toBeNull());
+  expect((await allEntries()).find((entry) => entry.id === "jett-extra-3")?.data)
+    .toEqual({ ...data, name: "Abdominal Crunch", catalogId: "EB43ADD4", exerciseId: "jett-extra-3" });
+  fireEvent.click(screen.getAllByRole("button", { name: "Strength" })[0]);
+  fireEvent.change(await screen.findByLabelText("ฟิตเนส"), { target: { value: "Jett" } });
+  expect(screen.getAllByRole("heading", { name: "Abdominal Crunch" })).toHaveLength(2);
+});
 it("removes an unused gym from every list but never one with history", async () => {
   const machine = { name: "Old Press", thai: "", group: "อก", setup: "", cues: "", loadMode: "total" };
   await save("machine", { ...machine, gym: "อื่น ๆ", archived: true }, "old-other");
