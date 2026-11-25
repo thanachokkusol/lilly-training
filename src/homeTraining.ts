@@ -1,4 +1,5 @@
-import type { Entry, Machine } from "./types";
+import type { Entry, ExerciseTarget, Machine } from "./types";
+import { cooldownStretches } from "./stretchTraining";
 
 export const homeGym = "ที่บ้าน";
 const retiredHomeRoutineId = "routine-home-full-body";
@@ -32,6 +33,9 @@ export const homeMoves = [
   { id: "home-chair-squat", name: "Chair Squat", thai: "ลุกนั่งจากเก้าอี้", group: "ขา", loadMode: "bodyweight",
     setup: "ใช้เก้าอี้มั่นคง วางชิดผนังได้",
     cues: "วางเท้าราบ ดันสะโพกไปด้านหลัง แตะที่นั่งเบา ๆ แล้วกดเท้ายืนขึ้นโดยคุมเข่าไปทางเดียวกับปลายเท้า" },
+  { id: "home-db-deadlift", name: "Stiff-Legged Dumbbell Deadlift", thai: "ก้มพับสะโพกถือดัมเบล", group: "ขา", loadMode: "per-side",
+    setup: dumbbellPair,
+    cues: "ยืนกว้างเท่าสะโพก งอเข่าเล็กน้อยค้างไว้ ดันสะโพกไปด้านหลัง ดัมเบลใกล้ขา ลดลงเท่าที่หลังยังตรงและตึงหลังขา แล้วบีบก้นยืนขึ้น" },
   { id: "home-kb-swing", name: "Two-Hand Kettlebell Swing", thai: "เหวี่ยงเคตเทิลเบลสองมือ", group: "ขา", loadMode: "total",
     setup: kettlebell + " · เว้นพื้นที่ด้านหน้า",
     cues: "จับสองมือ พับสะโพกให้ลูกผ่านระหว่างขา จากนั้นเหยียดสะโพกให้ลูกลอยถึงระดับอก ผ่อนแขน และพับสะโพกรับจังหวะลง" },
@@ -95,7 +99,37 @@ export const homeCoachRoutine = {
   },
 };
 
+const legsTargets: Record<string, ExerciseTarget> = {
+  "home-goblet-squat": { sets: 3, reps: 12, note: "เคตเทิลเบล 5 กก. · ลง 3 วินาที ขึ้นช้า ๆ" },
+  "home-db-deadlift": { sets: 3, reps: 10, note: "เริ่ม 5 กก./ข้าง ฟอร์มนิ่งค่อยขึ้น 10" },
+  "home-dumbbell-lunge": { sets: 2, reps: 16, note: "ข้างละ 8 ครั้ง · เริ่ม 2.5 กก./ข้าง" },
+  "home-side-hip-abduction": { sets: 2, reps: 24, note: "ข้างละ 12 ครั้ง · น้ำหนักตัว" },
+  "home-floor-press": { sets: 3, reps: 10, note: "เริ่ม 5 กก./ข้าง ยังเหลือแรงค่อยขึ้น 10" },
+  "home-crunch": { sets: 3, reps: 12, note: "น้ำหนักตัว · ไม่ดึงคอ" },
+  "home-dead-bug": { sets: 2, reps: 16, note: "ข้างละ 8 ครั้ง · หลังล่างติดพื้น" },
+};
+export const homeLegsRoutine = {
+  id: "routine-home-legs-core-chest",
+  data: {
+    title: "Home · ขา + แกนกลาง + อก",
+    machineIds: [...Object.keys(legsTargets), ...cooldownStretches],
+    targets: legsTargets,
+    days: [],
+    note: "ลิลลี่จัดตามแนวโค้ช: เน้นฟอร์ม เหลือแรงอีก 2–3 ครั้งต่อเซต · 18 เซต ประมาณ 40 นาที + ยืด 12 นาที\n" +
+      "วอร์ม 5 นาที: ย่ำเท้าอยู่กับที่ แล้ว Chair Squat กับพับสะโพกมือเปล่าอย่างละ 10 ครั้ง (ไม่นับเซต)\n" +
+      "พัก 60–90 วินาทีต่อเซต · จำนวนครั้งที่เติมไว้เป็นเป้า แก้เป็นที่ทำจริงก่อนกดยืนยัน\n" +
+      "เล่นเวทครบแล้วกด “เปิดตัวจับเวลา Stretch” · หยุดถ้าเจ็บแปลบ ชา หรือเวียนหัว",
+  },
+};
+
 const guides: Record<string, string> = {
+  "stiff-legged dumbbell deadlift": "Stiff_Legged_Dumbbell_Deadlift",
+  "kneeling hip flexor stretch": "Kneeling_Hip_Flexor",
+  "side-lying quad stretch": "Side_Lying_Quad_Stretch",
+  "seated hamstring stretch": "Seated_Floor_Hamstring_Stretch",
+  "figure-four glute stretch": "Ankle_On_The_Knee",
+  "wall calf stretch": "Calf_Stretch_Hands_Against_Wall",
+  "child's pose": "Childs_Pose",
   "goblet squat": "Goblet_Squat",
   "dumbbell floor press": "Dumbbell_Floor_Press",
   "bent over two-dumbbell row": "Bent_Over_Two-Dumbbell_Row",
@@ -134,7 +168,9 @@ export function exerciseGuide(name: string) {
 }
 
 export function exerciseGuideFrames(guide: string) {
-  return ["Kettlebell_Upright_Row", "Wall_Chest_Stretch_Elbow"].includes(guide) ? [0] : [0, 1];
+  return ["Kettlebell_Upright_Row", "Wall_Chest_Stretch_Elbow", "Kneeling_Hip_Flexor", "Side_Lying_Quad_Stretch",
+    "Seated_Floor_Hamstring_Stretch", "Ankle_On_The_Knee", "Calf_Stretch_Hands_Against_Wall", "Childs_Pose"]
+    .includes(guide) ? [0] : [0, 1];
 }
 
 const demoLinks: Record<string, string> = {

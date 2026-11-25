@@ -1,18 +1,19 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { useRememberedView } from "./App";
-import { stretchMoves as moves } from "./stretchTraining";
+import { stretchMoves as moves, stretchTiming } from "./stretchTraining";
 
 type Phase = { move: number; side: string; rep: number; label: string; seconds: number };
 function phasesFor(indices: number[]) {
   const phases: Phase[] = [];
   for (const [index, move] of indices.entries()) {
-    const sides = move === 2 ? ["สองข้างพร้อมกัน"] : ["ขวา", "ซ้าย"];
+    const { both, hold, reps, rest } = stretchTiming(moves[move].id);
+    const sides = both ? ["สองข้างพร้อมกัน"] : ["ขวา", "ซ้าย"];
     for (const side of sides) {
       if (side === "ซ้าย") phases.push({ move, side, rep: 1, label: "เปลี่ยนข้าง", seconds: 10 });
-      for (let rep = 1; rep <= 3; rep++) {
-        phases.push({ move, side, rep, label: "ยืด", seconds: 10 });
-        if (rep < 3) phases.push({ move, side, rep, label: "พัก", seconds: 10 });
+      for (let rep = 1; rep <= reps; rep++) {
+        phases.push({ move, side, rep, label: "ยืด", seconds: hold });
+        if (rep < reps) phases.push({ move, side, rep, label: "พัก", seconds: rest });
       }
     }
     if (index < indices.length - 1)
@@ -104,7 +105,7 @@ export default function Stretch({ ids, sessionId, onSave, back, photo }: {
             {ids.length > 1 && photo(moves[current.move].id)}
             <div className={`notice stretch-phase ${current.label === "ยืด" ? "active" : ""}`}>
               <h3>{current.label} · {remaining} วิ</h3>
-              <p>{moves[current.move].thai} {current.side && `· ${current.side}`}{current.label !== "เปลี่ยนท่า" && ` · ครั้ง ${current.rep}/3`}</p>
+              <p>{moves[current.move].thai} {current.side && `· ${current.side}`}{current.label !== "เปลี่ยนท่า" && ` · ครั้ง ${current.rep}/${stretchTiming(moves[current.move].id).reps}`}</p>
               <p className="preserve">{moves[current.move].cues}</p>
             </div>
             <progress max={total} value={Math.min(elapsed, total)} aria-label="ความคืบหน้าการยืด" />

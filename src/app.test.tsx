@@ -156,6 +156,45 @@ it.each([
     Reflect.deleteProperty(URL, "revokeObjectURL");
   }
 });
+it("starts today's home program with planned sets, guide photos and the cool-down timer", async () => {
+  location.hash = "#today";
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Home · ขา \+ แกนกลาง \+ อก/ }));
+  const plan = await topDialog();
+  expect((plan.getByLabelText("ยิมที่ฝึก") as HTMLSelectElement).value).toBe("ที่บ้าน");
+  expect(plan.getByText(/ดันดัมเบลบนพื้น · 3 เซต × 10 ครั้ง/)).toBeTruthy();
+  fireEvent.click(plan.getByRole("button", { name: /เริ่มบันทึก 14 ท่า/ }));
+  await screen.findByText(/เสร็จ 0\/14 ท่า/);
+  const session = async () => (await allEntries()).find((entry) => entry.kind === "session")!;
+  const planned = (await session()).data.exercises;
+  expect(planned.map((x: any) => x.sets.length)).toEqual([3, 3, 2, 2, 3, 3, 2, 0, 0, 0, 0, 0, 0, 0]);
+  // Planned values are neither weights nor finished sets.
+  expect(planned.flatMap((x: any) => x.sets).every((set: any) => set.load === null && !set.done)).toBe(true);
+  expect(screen.getByRole("button", { name: /เปิดตัวจับเวลา Stretch · 7 ท่า/ })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "เปิด Crunch" }));
+  const focus = await topDialog();
+  expect(focus.getByText("เป้าวันนี้ 3 เซต × 12 ครั้ง")).toBeTruthy();
+  expect(focus.getAllByAltText(/Crunch ภาพ/)).toHaveLength(2);
+  fireEvent.click(focus.getByRole("button", { name: "ยืนยันเซต 1" }));
+  fireEvent.click(focus.getByRole("button", { name: /รายการวันนี้/ }));
+  expect(await screen.findByText(/เป้า 3 เซต × 12 ครั้ง · เสร็จ 1\/3/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: /เปิดตัวจับเวลา Stretch/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "เริ่มจับเวลาทั้งชุด" }));
+  const timer = await topDialog();
+  expect(timer.getByRole("heading", { name: /ยืด · 20 วิ/ })).toBeTruthy();
+  expect(timer.getByText(/ยืดหน้าสะโพก คุกเข่า · ขวา · ครั้ง 1\/2/)).toBeTruthy();
+  const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 20_100);
+  try {
+    await timer.findByText(/ยืดหน้าสะโพก คุกเข่า · ทำแล้ว 1 ครั้ง/);
+    fireEvent.click(timer.getByRole("button", { name: "บันทึกผลที่ทำแล้ว" }));
+  } finally {
+    clock.mockRestore();
+  }
+  fireEvent.click(await screen.findByRole("button", { name: "จบการฝึก" }));
+  await waitFor(async () => expect((await session()).data.status).toBe("completed"));
+  const done = (await session()).data.exercises.flatMap((x: any) => x.sets.filter((set: any) => set.done).map((set: any) => [x.machineId, set.reps, set.holdSeconds]));
+  expect(done).toEqual([["home-crunch", 12, undefined], ["home-stretch-hip-flexor", 1, 20]]);
+});
 it("opens the adapted coach plan with the home gym and all six exercises selected", async () => {
   location.hash = "#today";
   render(<App />);

@@ -43,6 +43,7 @@ import type {
   Session,
   ExerciseLog,
   SetLog,
+  ExerciseTarget,
   Cardio,
   Body,
 } from "./types";
@@ -132,11 +133,11 @@ import ExerciseChart from "./ExerciseChart";
 import { gymCatalogId, gymName, gymsFor, type Gym } from "./gyms";
 import { planSessionMove, type MachineMove } from "./migration";
 import { recoverFormDraft } from "./formDraft";
-import { exerciseDemoLink, exerciseGuide, exerciseGuideFrames, homeCoachRoutine, homeGym, homeMoves, isObsoleteHomeRoutine } from "./homeTraining";
+import { exerciseDemoLink, exerciseGuide, exerciseGuideFrames, homeCoachRoutine, homeLegsRoutine, homeGym, homeMoves, isObsoleteHomeRoutine } from "./homeTraining";
 import { reportUrl } from "./bodyDetails";
 import { cardioMix } from "./cardioMix";
 import Stretch from "./Stretch";
-import { chestStretchRoutine, isStretch, stretchMoves } from "./stretchTraining";
+import { chestStretchRoutine, isStretch, stretchMoves, stretchTiming } from "./stretchTraining";
 import StrengthTile from "./StrengthTile";
 type Context = {
   entries: Entry[];
@@ -164,7 +165,10 @@ const shortDate = (d: string) =>
     month: "short",
     timeZone: "UTC",
   }).format(new Date(d + "T12:00:00Z"));
-function exerciseFor(machine: Entry, entries: Entry[] = [], date = today(), sessionId?: string): ExerciseLog {
+const targetText = (target: ExerciseTarget) => `${target.sets} เซต × ${target.reps} ครั้ง`;
+function exerciseFor(
+  machine: Entry, entries: Entry[] = [], date = today(), sessionId?: string, target?: ExerciseTarget,
+): ExerciseLog {
   const m = machine.data as Machine;
   if (isStretch(machine.id)) return { machineId: machine.id, setup: m.setup, loadMode: "bodyweight", note: "", sets: [] };
   const last = latestExercise(entries, machine.id, date, sessionId)?.exercise;
@@ -172,6 +176,22 @@ function exerciseFor(machine: Entry, entries: Entry[] = [], date = today(), sess
     (["total", "per-side"].includes(last.loadMode) && ["total", "per-side"].includes(m.loadMode)));
   const previous = comparable ? last.sets.filter((set) => set.done && !set.warmup) : [];
   const suggestedSets = last?.reportedOnly ? previous.slice(0, 1) : previous;
+  if (target) return {
+    machineId: machine.id,
+    setup: m.setup,
+    loadMode: m.loadMode,
+    note: "",
+    target,
+    // The planned repetitions are only a starting value; a set counts after it is confirmed.
+    sets: Array.from({ length: target.sets }, (_, index) => {
+      const before = suggestedSets[Math.min(index, suggestedSets.length - 1)];
+      return {
+        id: uid(), reps: target.reps, warmup: false, done: false,
+        load: before ? totalLoad(before, last!.loadMode) : null,
+        ...(before && { enteredAs: before.enteredAs ?? (last!.loadMode === "per-side" ? "perSide" : "total") }),
+      };
+    }),
+  };
   return {
     machineId: machine.id,
     setup: m.setup,
@@ -192,6 +212,7 @@ function newSession(
   entries: Entry[],
   date = today(),
   gym?: string,
+  targets: Record<string, ExerciseTarget> = {},
 ): Session {
   return {
     date,
@@ -201,7 +222,7 @@ function newSession(
     note: "",
     exercises: machineIds.flatMap((id) => {
       const m = entries.find((e) => e.id === id && e.kind === "machine");
-      return m ? [exerciseFor(m, entries, date)] : [];
+      return m ? [exerciseFor(m, entries, date, undefined, targets[id])] : [];
     }),
   };
 }
@@ -611,7 +632,7 @@ export default function App() {
   const locked = cloudUrl && (!authUser || localStorage.getItem("lilly-locked") === "true" ||
     (cachedOwner && cachedOwner !== authUser));
   const ready = loaded && (!canSync || !online || initialSync === authUser);
-  const needsHomeTraining = [homeCoachRoutine, chestStretchRoutine, ...homeMoves, ...stretchMoves].some(({ id }) =>
+  const needsHomeTraining = [homeCoachRoutine, homeLegsRoutine, chestStretchRoutine, ...homeMoves, ...stretchMoves].some(({ id }) =>
     !entries.some((entry) => entry.id === id));
   const obsoleteHomeRoutineId = entries.find(isObsoleteHomeRoutine)?.id;
   const octoberWalkIds = entries.filter(octoberWalkWeek).map((entry) => entry.id).join(",");
@@ -912,7 +933,9 @@ function Today({ nav }: { nav: (p: string) => void }) {
       )
       .sort((a, b) => b.data.date.localeCompare(a.data.date) || b.updatedAt.localeCompare(a.updatedAt))
       .slice(0, 4);
-  const [routine, setRoutine] = useState<{ data: { title: string; machineIds: string[]; note?: string } } | null>(null);
+  const [routine, setRoutine] = useState<{ data: {
+    title: string; machineIds: string[]; note?: string; targets?: Record<string, ExerciseTarget>;
+  } } | null>(null);
   const startRoutine = (r: NonNullable<typeof routine>) => {
     setRoutine(r);
     setStart(true);
@@ -1125,6 +1148,7 @@ function Today({ nav }: { nav: (p: string) => void }) {
           initial={routine?.data.machineIds}
           initialTitle={routine?.data.title}
           initialNote={routine?.data.note}
+          initialTargets={routine?.data.targets}
           close={() => { setStart(false); setRoutine(null); }}
           done={(id) => {
             setStart(false);
@@ -1406,6 +1430,9 @@ function RoutineSettings() {
                     machineIds: selected,
                     days: f.getAll("days"),
                     note: String(f.get("note")),
+                    ...(edit?.data.targets && {
+                      targets: Object.fromEntries(Object.entries(edit.data.targets).filter(([id]) => selected.includes(id))),
+                    }),
                     ...(currentProfile()?.role === "trainer"
                       ? { assignedBy: currentProfile()!.displayName }
                       : edit?.data.assignedBy
@@ -1495,6 +1522,18 @@ function MachineCover({ entry, entries }: { entry: Entry; entries: Entry[] }) {
   return guide && !coverPhoto
     ? <img loading="lazy" src={`${import.meta.env.BASE_URL}exercise-guides/${guide}/0.jpg`} alt={`ภาพประกอบ ${m.name}`} />
     : <Photo id={coverPhoto} alt={m.name} />;
+}
+
+/** The machine's own photo, or both frames of the bundled guide for a home exercise. */
+function MachinePhoto({ id }: { id: string }) {
+  const { entries } = useData();
+  const entry = entries.find((e) => e.id === id && e.kind === "machine");
+  if (!entry) return <Photo alt="เครื่อง" />;
+  const { main } = machinePhotoIds(entries, id, entry.data);
+  const guide = entry.data.gym === homeGym && (!main || main.startsWith("guide-photo-")) ? exerciseGuide(entry.data.name) : undefined;
+  return guide ? <>{exerciseGuideFrames(guide).map((frame) => (
+    <img key={frame} src={`${import.meta.env.BASE_URL}exercise-guides/${guide}/${frame}.jpg`} alt={`${entry.data.name} ภาพ ${frame + 1}`} />
+  ))}</> : <Photo id={main} alt={entry.data.name} />;
 }
 
 function MachineTile({ e, onClick }: { e: Entry; onClick: () => void }) {
@@ -2132,17 +2171,20 @@ function StartSession({
   initial = [],
   initialTitle,
   initialNote,
+  initialTargets,
 }: {
   close: () => void;
   done: (id: string) => void;
   initial?: string[];
   initialTitle?: string;
   initialNote?: string;
+  initialTargets?: Record<string, ExerciseTarget>;
 }) {
   const { entries, run, refresh } = useData(),
     [selection, setSelection] = useState(initial),
     [title, setTitle] = useState(initialTitle ?? (initial.length ? "ฝึกเวท" : "Upper Body")),
     [routineNote, setRoutineNote] = useState(initialNote ?? ""),
+    [targets, setTargets] = useState(initialTargets ?? {}),
     [query, setQuery] = useState(""),
     [create, setCreate] = useState(false),
     [date, setDate] = useState(today());
@@ -2191,6 +2233,7 @@ function StartSession({
               onClick={() => {
                 setTitle(t);
                 setRoutineNote("");
+                setTargets({});
                 setSelection(
                   machines
                     .filter(
@@ -2215,6 +2258,7 @@ function StartSession({
               onClick={() => {
                 setTitle(r.data.title);
                 setRoutineNote(r.data.note ?? "");
+                setTargets(r.data.targets ?? {});
                 const routineMachines = allMachines.filter((machine) =>
                   r.data.machineIds.includes(machine.id) && gyms.some((item) => item.id === machine.data.gym));
                 const routineGym = routineMachines.find((machine) => machine.data.gym === gym)?.data.gym ??
@@ -2248,7 +2292,8 @@ function StartSession({
             <span>
               {e.data.name}
               <small>
-                {[gymName(entries, e.data.gym), e.data.label, e.data.thai].filter(Boolean).join(" · ")}
+                {[gymName(entries, e.data.gym), e.data.label, e.data.thai,
+                  targets[e.id] && targetText(targets[e.id])].filter(Boolean).join(" · ")}
               </small>
             </span>
             {selection.includes(e.id) && <b>{selection.indexOf(e.id) + 1}</b>}
@@ -2265,7 +2310,7 @@ function StartSession({
             run(async () => {
               const e = await save(
                 "session",
-                newSession(title, selectedMachines, entries, date, gym),
+                newSession(title, selectedMachines, entries, date, gym, targets),
               );
               await refresh();
               done(e.id);
@@ -4120,7 +4165,7 @@ function SessionView({ source, close }: { source: Entry; close: () => void }) {
               <div className={`exercise-item ${done.length ? "done" : ""}`} key={x.machineId}>
                 <div className="exercise-open">
                   <span className="exercise-thumb">
-                    <Photo id={m && machinePhotoIds(entries, x.machineId, m).main} alt={m?.name ?? "เครื่อง"} />
+                    <MachinePhoto id={x.machineId} />
                     <b>{i + 1}</b>
                   </span>
                   <span className="exercise-text">
@@ -4358,7 +4403,7 @@ function SessionEditorForm({
       exercises: previous.exercises.map((exercise) => {
         const reps = results.get(exercise.machineId);
         if (!reps) return exercise;
-        const set: SetLog = { id: uid(), reps, holdSeconds: 10, load: null, warmup: false, done: true };
+        const set: SetLog = { id: uid(), reps, holdSeconds: stretchTiming(exercise.machineId).hold, load: null, warmup: false, done: true };
         return { ...exercise, sets: [...exercise.sets, set] };
       }),
     }));
@@ -4446,14 +4491,12 @@ function SessionEditorForm({
                       onClick={() => setFocus(i)}
                     >
                       <span className="exercise-thumb">
-                        <Photo
-                          id={m && machinePhotoIds(entries, x.machineId, m).main}
-                          alt={m?.name ?? "เครื่อง"}
-                        />
+                        <MachinePhoto id={x.machineId} />
                         <b>{i + 1}</b>
                       </span>
                       <span className="exercise-text">
                         <strong>{m?.name ?? "ไม่ทราบเครื่อง"}</strong>
+                        {x.target && <small>เป้า {targetText(x.target)} · เสร็จ {done.length}/{x.target.sets}</small>}
                         {done.length ? (
                           <small className="ok">
                             {done
@@ -4662,10 +4705,7 @@ function ExerciseFocus({
         </span>
       </div>
       <div className="focus-photo">
-        <Photo
-          id={m && machinePhotoIds(entries, x.machineId, m).main}
-          alt={m?.name ?? "เครื่อง"}
-        />
+        <MachinePhoto id={x.machineId} />
       </div>
       <div className="focus-title">
         <small>
@@ -4674,6 +4714,12 @@ function ExerciseFocus({
         <h3>{m?.name ?? "ไม่ทราบเครื่อง"}</h3>
         {m?.thai && <p className="muted">{m.thai}</p>}
       </div>
+      {x.target && (
+        <div className="notice">
+          <strong>เป้าวันนี้ {targetText(x.target)}</strong>
+          {x.target.note && <p>{x.target.note}</p>}
+        </div>
+      )}
       <div className="info-grid">
         <div className="previous">
           <span className="eyebrow">ครั้งก่อน</span>

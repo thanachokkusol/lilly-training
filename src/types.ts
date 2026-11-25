@@ -44,7 +44,14 @@ export interface SetLog {
   warmup: boolean;
   done: boolean;
 }
+/** What a program asks for. Shown as a guide; never counted as done. */
+export interface ExerciseTarget {
+  sets: number;
+  reps: number;
+  note?: string;
+}
 export interface ExerciseLog {
+  target?: ExerciseTarget;
   originalName?: string;
   reportedOnly?: boolean;
   machineId: string;

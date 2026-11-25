@@ -3011,3 +3011,11 @@ summary {
 #recharts_measurement_span {
   visibility: hidden;
 }
+.focus-photo:has(img + img) {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+.exercise-thumb img + img {
+  display: none;
+}

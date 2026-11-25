@@ -3,7 +3,7 @@ import type { Entry, Kind, Session } from "./types";
 import { validateEntry } from "./validation";
 import { exerciseKey, octoberWalkWeek, today } from "./core";
 import { planSessionMove, type MachineMove } from "./migration";
-import { exerciseGuideFrames, homeCoachRoutine, homeGym, homeMoves, isObsoleteHomeRoutine } from "./homeTraining";
+import { exerciseGuideFrames, homeCoachRoutine, homeLegsRoutine, homeGym, homeMoves, isObsoleteHomeRoutine } from "./homeTraining";
 import { chestStretchRoutine, stretchMoves } from "./stretchTraining";
 const loadZip = () => import("jszip").then((m) => m.default);
 export const sandbox =
@@ -100,6 +100,7 @@ export async function addMissingHomeTraining(obsoleteId?: string) {
     ...[...homeMoves, ...stretchMoves].map(({ id, ...data }) => ({ id, kind: "machine" as const, data: { ...data, gym: homeGym } })),
     { ...homeCoachRoutine, kind: "routine" as const },
     { ...chestStretchRoutine, kind: "routine" as const },
+    { ...homeLegsRoutine, kind: "routine" as const },
   ];
   const updatedAt = new Date().toISOString();
   const missing: Entry[] = defaults.filter(({ id }) => !existing.has(id))

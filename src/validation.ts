@@ -18,6 +18,10 @@ export function validDate(s: unknown): s is string {
 const num = (v: unknown, max = 1e6) =>
   v === null ||
   (typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= max);
+const validTarget = (t: any) =>
+  !!t && typeof t === "object" && Number.isInteger(t.sets) && t.sets >= 1 && t.sets <= 20 &&
+  Number.isInteger(t.reps) && t.reps >= 1 && t.reps <= 1000 &&
+  (t.note === undefined || (typeof t.note === "string" && t.note.length <= 500));
 export function validateEntry(e: Pick<Entry, "id" | "kind" | "data">) {
   if (
     typeof e.id !== "string" ||
@@ -96,6 +100,7 @@ export function validateEntry(e: Pick<Entry, "id" | "kind" | "data">) {
       throw Error("ครั้งฝึกไม่ถูกต้อง");
     const ids = new Set();
     for (const x of d.exercises) {
+      if (x?.target !== undefined && !validTarget(x.target)) throw Error("เป้าเซตไม่ถูกต้อง");
       const text = (v: unknown, max = 5000) =>
         v == null || (typeof v === "string" && v.length <= max);
       if (
@@ -165,7 +170,9 @@ export function validateEntry(e: Pick<Entry, "id" | "kind" | "data">) {
       !Array.isArray(d.machineIds) ||
       d.machineIds.some((id: unknown) => typeof id !== "string") ||
       new Set(d.machineIds).size !== d.machineIds.length ||
-      !Array.isArray(d.days))
+      !Array.isArray(d.days) ||
+      (d.targets !== undefined && (!d.targets || typeof d.targets !== "object" || Array.isArray(d.targets) ||
+        Object.values(d.targets).some((target) => !validTarget(target)))))
   )
     throw Error("โปรแกรมฝึกไม่ถูกต้อง");
 }
