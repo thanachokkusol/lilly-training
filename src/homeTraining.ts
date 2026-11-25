@@ -124,6 +124,8 @@ export const homeLegsRoutine = {
 
 const guides: Record<string, string> = {
   "stiff-legged dumbbell deadlift": "Stiff_Legged_Dumbbell_Deadlift",
+  "doorway chest stretch": "Doorway_Chest_Stretch",
+  "wall chest stretch (straight arm)": "Wall_Chest_Stretch_Straight",
   "kneeling hip flexor stretch": "Kneeling_Hip_Flexor",
   "side-lying quad stretch": "Side_Lying_Quad_Stretch",
   "seated hamstring stretch": "Seated_Floor_Hamstring_Stretch",
@@ -168,7 +170,7 @@ export function exerciseGuide(name: string) {
 }
 
 export function exerciseGuideFrames(guide: string) {
-  return ["Kettlebell_Upright_Row", "Wall_Chest_Stretch_Elbow", "Kneeling_Hip_Flexor", "Side_Lying_Quad_Stretch",
+  return ["Kettlebell_Upright_Row", "Wall_Chest_Stretch_Elbow", "Doorway_Chest_Stretch", "Wall_Chest_Stretch_Straight", "Kneeling_Hip_Flexor", "Side_Lying_Quad_Stretch",
     "Seated_Floor_Hamstring_Stretch", "Ankle_On_The_Knee", "Calf_Stretch_Hands_Against_Wall", "Childs_Pose"]
     .includes(guide) ? [0] : [0, 1];
 }
