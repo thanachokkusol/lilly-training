@@ -148,7 +148,7 @@ import { cueKeys, playCue, restCue, restStage, type RestCue } from "./restSound"
 import { copyText } from "./clipboard";
 import WorkoutSummary, { MachineInsights, WorkoutNumbers } from "./WorkoutSummary";
 import { CatalogDetail, CatalogSearch, CatalogSteps, HowTo, ImageCredit, catalogImageUrl, useCatalog } from "./ExerciseLibrary";
-import { equipmentLabels, matchesExercise, noGym, searchCatalog, type CatalogItem } from "./catalog";
+import { equipmentLabels, matchesExercise, noGym, mergedHowTo, searchCatalog, type CatalogItem } from "./catalog";
 import { catalogLinks } from "./catalogLinks";
 import { identifiedJettMachine, isPendingMachine, jettIdentification, withoutDuplicateJettCards } from "./pendingMachines";
 import { catalogIdOf, categoryLabel, categoryOf, legacyGroup, legMuscles, muscleIds, muscleLabels, musclesFor, muscleText, stretchCategory } from "./muscles";
@@ -672,6 +672,13 @@ export default function App() {
   useEffect(() => {
     if (ready && !locked && profile?.role === "owner") void run(removeEmptyNovemberPulldown);
   }, [ready, locked, profile?.role]);
+  const needsHowTo = entries.some((e) => e.kind === "machine" && !e.deleted && !e.data.howToMerged);
+  const howToCatalog = useCatalog(Boolean(ready && !locked && needsHowTo && !viewing));
+  useEffect(() => {
+    if (ready && !locked && needsHowTo && howToCatalog && !viewing) void mergeLibraryHowTo(howToCatalog).then(refresh, () => {
+      // Quietly retried on the next load; it never blocks the screen.
+    });
+  }, [ready, locked, needsHowTo, howToCatalog]);
   const hasPushable = entries.some((e) => e.dirty && !e.conflict);
   useEffect(() => {
     if (!canSync || !online || !hasPushable) return;
@@ -1664,7 +1671,18 @@ function sharedNote(entries: Entry[], machine: Entry, field: "setup" | "cues") {
 }
 async function saveSharedNote(entries: Entry[], machine: Entry, field: "setup" | "cues", text: string) {
   for (const v of exerciseVariants(entries, machine))
-    if (String(v.data[field] ?? "") !== text) await save("machine", { ...v.data, [field]: text }, v.id);
+    if (String(v.data[field] ?? "") !== text || (field === "cues" && !v.data.howToMerged))
+      await save("machine", { ...v.data, [field]: text, ...(field === "cues" && { howToMerged: true }) }, v.id);
+}
+/** Writes the library steps into each exercise's single how-to field once, so editing changes all of it. */
+async function mergeLibraryHowTo(items: CatalogItem[]) {
+  const all = await allEntries();
+  const machines = all.filter((e) => e.kind === "machine" && !e.deleted && !e.data.howToMerged);
+  for (const machine of machines) {
+    const item = items.find((i) => i.id === catalogIdOf(machine.data));
+    const cues = mergedHowTo(String(machine.data.cues ?? ""), item);
+    await save("machine", { ...machine.data, cues, howToMerged: true }, machine.id);
+  }
 }
 
 type GalleryItem = { key: string; photoId?: string; src?: string; label: string; machineId: string };
@@ -2089,11 +2107,10 @@ function MachineDetail({ id, close, selectMachine }: {
         </div>
         <div>
           <h4>วิธีเล่น</h4>
-          {(sharedNote(entries, e, "cues") || !catalogIdOf(m)) && <p className="preserve">{sharedNote(entries, e, "cues") || "ยังไม่มีบันทึก"}</p>}
+          <p className="preserve">{sharedNote(entries, e, "cues") || "ยังไม่มีบันทึก"}</p>
           {exerciseDemoLink(m.name) && (
             <a className="text-button" href={exerciseDemoLink(m.name)} target="_blank" rel="noreferrer">ดูตัวอย่างท่า</a>
           )}
-          {catalogIdOf(m) && <HowTo catalogId={catalogIdOf(m)!} images={!shown && !guide} open />}
         </div>
         <div>
           <h4>รูปเครื่อง</h4>
@@ -5431,6 +5448,13 @@ function ExerciseFocus({
     x.loadMode === "per-side" ? "perSide" : "total",
   );
   const own = entries.find((e) => e.id === x.machineId && e.kind === "machine");
+  const catalog = useCatalog();
+  // One field for the how-to: the owner's notes and the library steps together, edited as a whole.
+  const howToText = (machine: Entry) => {
+    const shared = sharedNote(entries, machine, "cues");
+    if (exerciseVariants(entries, machine).some((v) => v.data.howToMerged)) return shared;
+    return mergedHowTo(shared, catalog?.find((item) => item.id === catalogIdOf(machine.data)));
+  };
   const m = own?.data as Machine | undefined;
   const last = latestExercise(entries, x.machineId, date || today(), sessionId),
     best = bestSet(
@@ -5570,7 +5594,7 @@ function ExerciseFocus({
           </button>
         )}
       </div>
-      <ReadEdit label="การตั้งเครื่อง (ใช้ร่วมทุกยิม)" value={own ? sharedNote(entries, own, "setup") : x.setup} empty="ยังไม่ได้จดการตั้งเครื่อง"
+      <ReadEdit label="การตั้งเครื่อง" value={own ? sharedNote(entries, own, "setup") : x.setup} empty="ยังไม่ได้จดการตั้งเครื่อง"
         placeholder="เช่น เบาะระดับ 6"
         save={async (setup) => {
           update({ ...x, setup });
@@ -5578,11 +5602,9 @@ function ExerciseFocus({
           if (own) await saveSharedNote(entries, own, "setup", setup);
         }} />
       <div className="how-to merged">
-        <ReadEdit label="วิธีเล่น (ใช้ร่วมทุกยิม)" value={own ? sharedNote(entries, own, "cues") : ""} empty="ยังไม่ได้เขียนวิธีเล่นเอง" multiline
-          placeholder="จุดที่ต้องระวัง / สิ่งที่โค้ชแนะนำ"
+        <ReadEdit label="วิธีเล่น" value={own ? howToText(own) : ""} empty="ยังไม่ได้เขียนวิธีเล่น" multiline
+          placeholder="ขั้นตอน / จุดที่ต้องระวัง / สิ่งที่โค้ชแนะนำ"
           save={own ? (cues) => saveSharedNote(entries, own, "cues", cues) : undefined} />
-        {m && catalogIdOf(m) && <CatalogSteps catalogId={catalogIdOf(m)!}
-          images={!machinePhotoIds(entries, x.machineId, m).main && !exerciseGuide(m.name)} />}
       </div>
       <Field label="โน้ตท่านี้">
         <input

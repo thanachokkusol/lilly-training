@@ -53,3 +53,20 @@ export function searchCatalog(items: CatalogItem[], query: string, muscle = "", 
   return items.filter((item) => !item.archived && (!muscle || item.primary === muscle) && (!equipment || item.equipment === equipment) &&
     matchesExercise(query, item.th, item.en, categoryLabel(item.primary), ...(item.aliases ?? [])));
 }
+
+/** The library's how-to as plain text, so it can live in the same single field as the owner's own notes. */
+export function catalogHowToText(item: CatalogItem) {
+  return [
+    item.steps.map((step, i) => `${i + 1}. ${step}`).join("\n"),
+    item.caution && `ข้อควรระวัง: ${item.caution}`,
+    item.note && `หมายเหตุ: ${item.note}`,
+  ].filter(Boolean).join("\n");
+}
+/** Own notes first, then the library steps, unless they are already in the text. */
+export function mergedHowTo(cues: string, item?: CatalogItem) {
+  const own = cues.trim();
+  if (!item) return own;
+  const steps = catalogHowToText(item);
+  if (item.steps[0] && own.includes(item.steps[0])) return own;
+  return own ? `${own}\n${steps}` : steps;
+}

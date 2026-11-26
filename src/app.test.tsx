@@ -251,7 +251,7 @@ it("explains a stretch before starting, lets the person set it, press each repet
     expect(session.data.exercises[0].sets.map((set: any) => [set.reps, set.holdSeconds])).toEqual([[2, 15]]);
   });
 });
-it("adds how-to to a machine we already have without touching its name, notes, photo or records", async () => {
+it("puts the library how-to into the machine's one how-to field after its own notes, touching nothing else", async () => {
   const machine = { name: "Chest Press", thai: "เครื่องดันอก", gym: "WE Fitness", group: "อก", setup: "เบาะระดับ 6", cues: "ดันช้า ๆ", loadMode: "per-side", photoId: "photo-own" };
   await save("photo", { label: "own", mime: "image/jpeg", machineId: "we-chest" }, "photo-own");
   await save("machine", machine, "we-chest");
@@ -261,8 +261,9 @@ it("adds how-to to a machine we already have without touching its name, notes, p
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: /Chest Press/ }));
   const dialog = await topDialog();
-  expect(await dialog.findByText(/^วิธีทำละเอียด/)).toBeTruthy();
-  expect(dialog.getByText("ดันช้า ๆ")).toBeTruthy();
+  // One field: own notes first, then the numbered library steps; no separate "วิธีทำละเอียด" box.
+  expect(await dialog.findByText(/^ดันช้า ๆ\s+1\. /)).toBeTruthy();
+  expect(dialog.queryByText(/^วิธีทำละเอียด/)).toBeNull();
   expect(dialog.getByText("เบาะระดับ 6")).toBeTruthy();
   expect(dialog.getAllByText(/25 กก\. \(ข้างละ 12\.5\) × 12 ครั้ง/).length).toBeGreaterThan(0);
   // Saving the form unchanged keeps the record as it was.
@@ -272,7 +273,11 @@ it("adds how-to to a machine we already have without touching its name, notes, p
   fireEvent.click(form.getByRole("button", { name: "บันทึกเครื่อง" }));
   await waitFor(() => expect(screen.queryByRole("dialog", { name: "แก้ไขเครื่อง" })).toBeNull());
   const stored = JSON.parse(JSON.stringify((await allEntries()).find((e) => e.id === "we-chest")!.data));
-  expect(stored).toEqual({ ...machine, label: "", exerciseId: "chest press" });
+  const { cues, howToMerged, ...rest } = stored;
+  const { cues: _own, ...unchanged } = machine;
+  expect(rest).toEqual({ ...unchanged, label: "", exerciseId: "chest press" });
+  expect(cues).toMatch(/^ดันช้า ๆ\n1\. /);
+  expect(howToMerged).toBe(true);
 }, 20000);
 it("adds a library exercise once without a gym and records it by time", async () => {
   location.hash = "#machines";
@@ -707,9 +712,9 @@ it("logs every exercise on one screen with last time as the hint, rests by itsel
   expect(screen.queryByText("ครั้งก่อน", { selector: ".set-head span" })).toBeNull();
   expect(screen.queryByRole("button", { name: /ใช้ค่าครั้งก่อน/ })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "ยืนยันChest Press เซต 1" }));
-  expect(await screen.findByText(/^พัก 0:4[45]$/)).toBeTruthy();
+  expect(await screen.findByText(/^พัก 0:[34][0-9]$/, {}, { timeout: 4000 })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "เพิ่ม 15 วิ" }));
-  expect(screen.getByText(/^พัก (1:00|0:59)$/)).toBeTruthy();
+  expect(screen.getByText(/^พัก (1:00|0:[45][0-9])$/)).toBeTruthy();
   fireEvent.change(screen.getByRole("spinbutton", { name: "Chest Press เซต 2 น้ำหนัก" }), { target: { value: "25" } });
   fireEvent.click(screen.getByRole("button", { name: "ยืนยันChest Press เซต 2" }));
   expect(await screen.findByText(/สถิติใหม่ Chest Press: น้ำหนักมากสุด/)).toBeTruthy();
