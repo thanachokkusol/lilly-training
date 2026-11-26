@@ -133,7 +133,7 @@ const isSharedEntry = (e: Entry) =>
   (e.kind === "photo" && !!e.data?.machineId);
 const Progress = lazy(() => import("./Progress"));
 import ExerciseChart from "./ExerciseChart";
-import { gymCatalogId, gymInUse, gymName, gymsFor, type Gym } from "./gyms";
+import { byGymOrder, gymCatalogId, gymInUse, gymName, gymsFor, type Gym } from "./gyms";
 import { planSessionMove, type MachineMove } from "./migration";
 import { recoverFormDraft } from "./formDraft";
 import { exerciseDemoLink, exerciseGuide, exerciseGuideFrames, homeCoachRoutine, homeLegsRoutine, homeGym, homeMoves, isObsoleteHomeRoutine } from "./homeTraining";
@@ -1636,6 +1636,103 @@ function MachinePhoto({ id }: { id: string }) {
   ))}</> : <Photo id={main} alt={entry.data.name} />;
 }
 
+/** Machines of one exercise, one per gym button: this one first, the rest in the usual gym order. */
+function exerciseVariants(entries: Entry[], e: Entry) {
+  const order = byGymOrder(entries);
+  const others = machineVariants(entries, e.data, true).filter((v) => v.id !== e.id &&
+    !(e.data.gym === "Jett" && v.data.gym === "Jett"));
+  return [e, ...others].sort((a, b) => order(a.data.gym, b.data.gym));
+}
+/** Gym name, plus the machine's own label only when the gym has more than one machine for the exercise. */
+function variantLabel(entries: Entry[], variant: Entry, all: Entry[]) {
+  const sameGym = all.filter((v) => v.data.gym === variant.data.gym).length > 1;
+  const label = variant.data.label?.trim();
+  return gymName(entries, variant.data.gym) + (sameGym && label && label.toLowerCase() !== variant.data.name.toLowerCase() ? ` · ${label}` : "");
+}
+
+type GalleryItem = { key: string; photoId?: string; src?: string; label: string; machineId: string };
+/**
+ * Every picture of the exercise at every gym: this machine's own photos first, then the illustration,
+ * then the other gyms. A picture shared by several machines (same photo or same bundled frame) shows once.
+ */
+function exerciseGallery(entries: Entry[], id: string): GalleryItem[] {
+  const own = entries.find((e) => e.id === id && e.kind === "machine");
+  if (!own) return [];
+  const variants = exerciseVariants(entries, own);
+  const mine: GalleryItem[] = [], guides: GalleryItem[] = [], others: GalleryItem[] = [];
+  for (const v of [own, ...variants.filter((x) => x.id !== id)]) {
+    const guide = v.data.gym !== "Jett" ? exerciseGuide(v.data.name) : undefined;
+    const { photos } = machinePhotoIds(entries, v.id, v.data);
+    for (const p of photos) {
+      const frame = p.id.startsWith("guide-photo-") ? p.id.slice(p.id.lastIndexOf("-") + 1) : null;
+      if (frame !== null) {
+        if (guide && !exerciseGuideFrames(guide).includes(Number(frame))) continue;
+        guides.push({ key: `guide:${guide ?? v.id}:${frame}`, photoId: p.id, label: "ภาพประกอบ", machineId: v.id });
+      } else (v.id === id ? mine : others).push({ key: p.id, photoId: p.id, label: variantLabel(entries, v, variants), machineId: v.id });
+    }
+    if (guide && !photos.some((p) => p.id.startsWith("guide-photo-")))
+      for (const frame of exerciseGuideFrames(guide))
+        guides.push({ key: `guide:${guide}:${frame}`, src: `${import.meta.env.BASE_URL}exercise-guides/${guide}/${frame}.jpg`,
+          label: "ภาพประกอบ", machineId: v.id });
+  }
+  const seen = new Set<string>();
+  return [...mine, ...guides, ...others].filter((item) => !seen.has(item.key) && seen.add(item.key));
+}
+
+/** One picture at a time with its gym on it; swipe or the buttons for the next, tap to enlarge. */
+function Gallery({ items, shown, show, alt, empty }: {
+  items: GalleryItem[]; shown?: string; show: (key: string) => void; alt: string; empty?: React.ReactNode;
+}) {
+  const index = Math.max(0, items.findIndex((item) => item.key === shown));
+  const item = items[index];
+  const touch = useRef<number | null>(null);
+  const [full, setFull] = useState(false);
+  const step = (by: number) => { const next = items[index + by]; if (next) show(next.key); };
+  const swipe = {
+    onTouchStart: (event: React.TouchEvent) => { touch.current = event.touches[0]?.clientX ?? null; },
+    onTouchEnd: (event: React.TouchEvent) => {
+      const start = touch.current, end = event.changedTouches[0]?.clientX;
+      touch.current = null;
+      if (start !== null && end !== undefined && Math.abs(end - start) >= 40) step(end < start ? 1 : -1);
+    },
+  };
+  const picture = (className = "") => item?.src
+    ? <img className={className} src={item.src} alt={`${alt} · ${item.label}`} />
+    : <Photo className={className} id={item?.photoId} alt={`${alt} · ${item?.label ?? ""}`} />;
+  return (
+    <>
+      <div className="detail-photo gallery-photo" {...swipe}>
+        {item ? (
+          <button type="button" className="gallery-open" aria-label="ขยายรูป" onClick={() => setFull(true)}>{picture()}</button>
+        ) : empty ?? <Photo alt={alt} />}
+        {item && <span className="photo-tag">{item.label}</span>}
+      </div>
+      {items.length > 1 && (
+        <div className="upload-row gallery-nav">
+          <button type="button" disabled={index <= 0} onClick={() => step(-1)}>รูปก่อนหน้า</button>
+          <span>{index + 1} / {items.length} · {item.label}</span>
+          <button type="button" disabled={index >= items.length - 1} onClick={() => step(1)}>รูปถัดไป</button>
+        </div>
+      )}
+      {full && item && (
+        <Modal title={`${alt} · ${index + 1} / ${items.length}`} close={() => setFull(false)}>
+          <div className="gallery-full" {...swipe}>
+            {picture()}
+            <span className="photo-tag">{item.label}</span>
+          </div>
+          {items.length > 1 && (
+            <div className="upload-row gallery-nav">
+              <button type="button" disabled={index <= 0} onClick={() => step(-1)}>รูปก่อนหน้า</button>
+              <span>{index + 1} / {items.length}</span>
+              <button type="button" disabled={index >= items.length - 1} onClick={() => step(1)}>รูปถัดไป</button>
+            </div>
+          )}
+        </Modal>
+      )}
+    </>
+  );
+}
+
 function MachineTile({ e, category = categoryOf(e.data), onClick }: { e: Entry; category?: string; onClick: () => void }) {
   const { entries } = useData(),
     m = e.data as Machine,
@@ -1648,7 +1745,8 @@ function MachineTile({ e, category = categoryOf(e.data), onClick }: { e: Entry; 
     <StrengthTile name={m.name} thai={thai} group={categoryLabel(category)} location={gymName(entries, m.gym)} onClick={onClick}
       photo={<MachineCover entry={e} entries={entries} />}>
         {m.gym !== "Jett" && <p className="muted">
-          มีเครื่องที่: {[...new Set(machineVariants(entries, m, true).map((x) => gymName(entries, x.data.gym)))].join(" · ")}
+          มีเครื่องที่: {[...new Set(machineVariants(entries, m, true).map((x) => x.data.gym))].sort(byGymOrder(entries))
+            .map((gym) => gymName(entries, gym)).join(" · ")}
         </p>}
         <div className="last-load">
           {last ? (
@@ -1814,7 +1912,6 @@ function MachineDetail({ id, close, selectMachine }: {
     [beginBusy, setBeginBusy] = useState(false),
     [showAll, setShowAll] = useState(false),
     [session, setSession] = useState<string | null>(null);
-  const touchStart = useRef<number | null>(null);
   const body = useRef<HTMLDivElement>(null);
   const [editor, setEditor] = useState<{ name: string; at: string } | null>(null);
   const cloudVersion = e?.version ?? 0;
@@ -1849,7 +1946,13 @@ function MachineDetail({ id, close, selectMachine }: {
       )
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
   const { photos, main: mainPhoto } = machinePhotoIds(entries, id, m);
-  const shown = photos.find((p) => p.id === previewId)?.id ?? mainPhoto;
+  const variants = exerciseVariants(entries, e);
+  // All gyms' pictures in one row; the buttons below act on a picture of this machine only.
+  const gallery = exerciseGallery(entries, id);
+  const shownKey = gallery.find((g) => g.key === previewId)?.key ??
+    gallery.find((g) => !!g.photoId && g.photoId === mainPhoto)?.key ?? gallery[0]?.key;
+  const shownItem = gallery.find((g) => g.key === shownKey);
+  const shown = shownItem?.machineId === id ? shownItem.photoId : undefined;
   const photoIndex = photos.findIndex((p) => p.id === shown);
   const photoTargets = entries.filter((item) => item.kind === "machine" && !item.deleted && !item.data.archived && item.id !== id);
   async function setMainPhoto(photoId: string) {
@@ -1907,36 +2010,15 @@ function MachineDetail({ id, close, selectMachine }: {
   return (
     <Modal title={m.name} close={close}>
       <div className="chips" aria-label="เลือกเครื่อง">
-        {(m.gym === "Jett" ? [e] : machineVariants(entries, m, true)).map((variant) => (
+        {variants.map((variant) => (
           <button key={variant.id} className={variant.id === id ? "selected" : ""}
             aria-pressed={variant.id === id} onClick={() => selectMachine(variant.id)}>
-            {gymName(entries, variant.data.gym)}{m.gym === "Jett" ? "" : variant.data.label ? ` · ${variant.data.label}` :
-              exerciseKey(variant.data) !== exerciseKey(m) ? ` · ${variant.data.name}` : ""}
+            {variantLabel(entries, variant, variants)}
           </button>
         ))}
         <button className="edit-only" onClick={() => setAddVariant(true)}>เพิ่มเครื่องของท่านี้</button>
       </div>
-      <div className="detail-photo"
-        onTouchStart={(event) => { touchStart.current = event.touches[0]?.clientX ?? null; }}
-        onTouchEnd={(event) => {
-          const start = touchStart.current;
-          touchStart.current = null;
-          const end = event.changedTouches[0]?.clientX;
-          if (start === null || end === undefined || Math.abs(end - start) < 40) return;
-          const next = photos[photoIndex + (end < start ? 1 : -1)];
-          if (next) setPreviewId(next.id);
-        }}>
-        {!shown && guide && !hasBundledPhotos ? (
-          <img src={`${import.meta.env.BASE_URL}exercise-guides/${guide}/${exerciseGuideFrames(guide)[0]}.jpg`} alt={m.name} />
-        ) : <Photo id={shown} alt={m.name} />}
-      </div>
-      {photos.length > 1 && (
-        <div className="upload-row">
-          <button disabled={photoIndex <= 0} onClick={() => setPreviewId(photos[photoIndex - 1].id)}>รูปก่อนหน้า</button>
-          <span>{photoIndex + 1} / {photos.length}</span>
-          <button disabled={photoIndex >= photos.length - 1} onClick={() => setPreviewId(photos[photoIndex + 1].id)}>รูปถัดไป</button>
-        </div>
-      )}
+      <Gallery items={gallery} shown={shownKey} show={setPreviewId} alt={m.name} />
       <div className="detail-body" ref={body}>
         <div className="focus-title">
           <small>
@@ -2000,16 +2082,16 @@ function MachineDetail({ id, close, selectMachine }: {
           <h4>รูปเครื่อง</h4>
           <p className="muted edit-only">วางรูปที่คัดลอกไว้เพื่อเพิ่มรูปได้</p>
           <div className="photo-strip">
-            {photos.map((p) => (
+            {gallery.map((g) => (
               <button
-                key={p.id}
-                className={p.id === mainPhoto ? "main" : ""}
-                aria-label={p.id === mainPhoto ? "รูปหลัก" : "เปิดรูปเครื่อง"}
-                aria-pressed={p.id === shown}
-                onClick={() => setPreviewId(p.id)}
+                key={g.key}
+                className={!!g.photoId && g.photoId === mainPhoto ? "main" : ""}
+                aria-label={!!g.photoId && g.photoId === mainPhoto ? "รูปหลัก" : g.machineId === id ? "เปิดรูปเครื่อง" : `เปิดรูป ${g.label}`}
+                aria-pressed={g.key === shownKey}
+                onClick={() => setPreviewId(g.key)}
               >
-                <Photo id={p.id} alt={p.data.label} />
-                {p.id === mainPhoto && <span>รูปหลัก</span>}
+                {g.src ? <img src={g.src} alt={g.label} /> : <Photo id={g.photoId} alt={g.label} />}
+                <span>{!!g.photoId && g.photoId === mainPhoto ? "รูปหลัก" : g.label}</span>
               </button>
             ))}
             <label className="photo-add">
@@ -3091,9 +3173,20 @@ function CardioForm({ entry, close }: { entry?: Entry; close: () => void }) {
       const id = await addPhoto(f, `หลักฐาน ${date}`);
       edited.current = true;
       setPhotoId(id);
+      if (entry && c) {
+        // A photo added to a saved log is attached right away; the numbers stay as they are.
+        await attachPhoto(id);
+        return;
+      }
       setOcr(f);
-    });
+    }, entry ? "แนบรูปติดล็อกแล้ว ตัวเลขเดิมไม่เปลี่ยน" : undefined);
   };
+  async function attachPhoto(id: string) {
+    const current = (await allEntries()).find((x) => x.id === entry!.id && !x.deleted);
+    if (!current) throw Error("ไม่พบล็อกนี้แล้ว");
+    await save("cardio", { ...current.data, photoId: id }, entry!.id);
+  }
+  const unsavedPhoto = entry && photoId && photoId !== c?.photoId;
   usePastedImage(form, upload);
   return (
     <Modal title={readOnly ? "ล็อกคาร์ดิโอ" : entry ? "แก้ไขล็อกคาร์ดิโอ" : "บันทึกคาร์ดิโอ"} close={close}>
@@ -3187,8 +3280,8 @@ function CardioForm({ entry, close }: { entry?: Entry; close: () => void }) {
         )}
         <div className="upload-drop edit-only">
           <ImagePlus size={26} />
-          <h3>เริ่มจากรูปหน้าจอเครื่องได้เลย</h3>
-          <p>อ่านตัวเลขในเครื่องนี้ แล้วตรวจให้ตรงก่อนยืนยัน · วางรูปที่คัดลอกไว้ได้เลย</p>
+          <h3>{entry ? "+ เพิ่มรูปหน้าจอเครื่อง" : "เริ่มจากรูปหน้าจอเครื่องได้เลย"}</h3>
+          <p>{entry ? "รูปจะบันทึกติดล็อกนี้ทันที ตัวเลขเดิมไม่เปลี่ยน" : "อ่านตัวเลขในเครื่องนี้ แล้วตรวจให้ตรงก่อนยืนยัน · วางรูปที่คัดลอกไว้ได้เลย"}</p>
           <div className="upload-row">
             <label className="secondary">
               <Camera size={17} />
@@ -3213,6 +3306,13 @@ function CardioForm({ entry, close }: { entry?: Entry; close: () => void }) {
             </label>
           </div>
         </div>
+        {unsavedPhoto && !readOnly && (
+          <div className="notice warning" role="alert">
+            <p>รูปนี้ยังไม่ได้บันทึกติดล็อก เครื่องอื่นจะไม่เห็น</p>
+            <button type="button" className="secondary" onClick={() =>
+              run(() => attachPhoto(photoId!), "แนบรูปติดล็อกแล้ว ตัวเลขเดิมไม่เปลี่ยน")}>บันทึกรูปนี้ติดล็อก</button>
+          </div>
+        )}
         {photoId && (
           <div className="evidence-preview">
             <Photo id={photoId} alt="หลักฐานคาร์ดิโอ" />
@@ -3226,7 +3326,7 @@ function CardioForm({ entry, close }: { entry?: Entry; close: () => void }) {
                 })
               }
             >
-              ครอปและอ่านรูปอีกครั้ง
+              {entry ? "อ่านตัวเลขจากรูปเพื่อเทียบ" : "ครอปและอ่านรูปอีกครั้ง"}
             </button>
           </div>
         )}
@@ -5215,6 +5315,41 @@ function SessionEditorForm({
     </Modal>
   );
 }
+/** Every picture of the exercise during a workout, with a way to add one for this gym's machine. */
+function FocusGallery({ machineId }: { machineId: string }) {
+  const { entries, run, readOnly } = useData();
+  const [shown, setShown] = useState<string | undefined>();
+  const machine = entries.find((e) => e.id === machineId && e.kind === "machine");
+  const items = exerciseGallery(entries, machineId);
+  const add = (file?: File) => {
+    if (!file || !machine) return;
+    void run(async () => {
+      const m = machine.data as Machine;
+      const photoId = await addPhoto(file, `${m.gym} ${m.name}`);
+      await save("photo", { label: m.name, machineId, mime: "image/jpeg" }, photoId);
+      if (!m.photoId) await save("machine", { ...m, photoId }, machineId);
+      setShown(photoId);
+    }, `เพิ่มรูปเครื่องที่ ${machine ? gymName(entries, machine.data.gym) : ""} แล้ว`);
+  };
+  return (
+    <div className="focus-gallery">
+      <Gallery items={items} shown={shown} show={setShown} alt={machine?.data.name ?? "เครื่อง"} />
+      {machine && !readOnly && (
+        <div className="photo-add-row">
+          <label className="secondary">
+            <Camera size={16} /> ถ่ายรูปเพิ่ม
+            <input hidden type="file" accept="image/*" capture="environment"
+              onChange={(ev) => { add(ev.target.files?.[0]); ev.target.value = ""; }} />
+          </label>
+          <label className="secondary">
+            <ImagePlus size={16} /> เลือกรูป
+            <input hidden type="file" accept="image/*" onChange={(ev) => { add(ev.target.files?.[0]); ev.target.value = ""; }} />
+          </label>
+        </div>
+      )}
+    </div>
+  );
+}
 /** Text that is read far more often than changed: shown as text, editable after ✏️ แก้. */
 function ReadEdit({ label, value, empty, placeholder, multiline, save }: {
   label: string; value: string; empty: string; placeholder?: string; multiline?: boolean;
@@ -5308,9 +5443,7 @@ function ExerciseFocus({
           ท่า {index + 1}/{total}
         </span>
       </div>
-      <div className="focus-photo">
-        <MachinePhoto id={x.machineId} />
-      </div>
+      <FocusGallery machineId={x.machineId} />
       <div className="focus-title">
         <small>
           {m && gymName(entries, m.gym)} · {m && categoryLabel(categoryOf(m))} · {loadLabel(x.loadMode)}

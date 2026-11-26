@@ -35,3 +35,13 @@ export function gymInUse(entries: Entry[], id: string) {
 export function gymName(entries: Entry[], id: string) {
   return gymsFor(entries).find((gym) => gym.id === id)?.name ?? id;
 }
+
+/** The order the owner reads gyms in everywhere: WE Fitness, M Fitness, Jett, home, then others, no gym last. */
+export function gymOrder(entries: Entry[], id: string) {
+  const name = gymName(entries, id).toLowerCase();
+  const rank = id === noGym ? 9 : /^we\b|we fitness/.test(name) ? 0 : /^m fitness|^m\b/.test(name) ? 1 :
+    /jett/.test(name) ? 2 : id === "ที่บ้าน" ? 3 : 5;
+  return rank;
+}
+export const byGymOrder = (entries: Entry[]) => (a: string, b: string) =>
+  gymOrder(entries, a) - gymOrder(entries, b) || gymName(entries, a).localeCompare(gymName(entries, b), "th");

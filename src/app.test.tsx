@@ -183,7 +183,11 @@ it("starts today's home program with planned sets, guide photos and the cool-dow
   fireEvent.click(screen.getByRole("button", { name: "เปิด Crunch" }));
   const focus = await topDialog();
   expect(focus.getByText("เป้าวันนี้ 3 เซต × 12 ครั้ง")).toBeTruthy();
-  expect(focus.getAllByAltText(/Crunch ภาพ/)).toHaveLength(2);
+  // Both illustration frames, one at a time, each marked as an illustration.
+  expect(focus.getByAltText("Crunch · ภาพประกอบ")).toBeTruthy();
+  expect(focus.getByText("1 / 2 · ภาพประกอบ")).toBeTruthy();
+  fireEvent.click(focus.getByRole("button", { name: "รูปถัดไป" }));
+  expect(focus.getByText("2 / 2 · ภาพประกอบ")).toBeTruthy();
   fireEvent.click(focus.getByRole("button", { name: "ยืนยันเซต 1" }));
   fireEvent.click(focus.getByRole("button", { name: /รายการวันนี้/ }));
   expect(await screen.findByText(/เป้า 3 เซต × 12 ครั้ง · เสร็จ 1\/3/)).toBeTruthy();
@@ -362,7 +366,7 @@ it("uses the original machine card for a matching catalog move in all locations"
   fireEvent.click(screen.getByRole("heading", { name: "Chest Press" }));
   expect((await topDialog()).getByText("เบาะระดับ 6")).toBeTruthy();
 });
-it("shows the identified Jett machine once, with its own photo and without cross-gym shortcuts", async () => {
+it("shows the identified Jett machine once, with its own photo and gym-name buttons only", async () => {
   const data = { name: "เครื่อง Jett หน้า 3 · รอยืนยันชื่อ", thai: "", gym: "Jett",
     group: "อื่น ๆ", setup: "", cues: "", loadMode: "total", photoId: "photo-jett-extra-3" };
   await save("machine", data, "jett-extra-3");
@@ -384,12 +388,32 @@ it("shows the identified Jett machine once, with its own photo and without cross
   fireEvent.click(screen.getByRole("heading", { name: "Abdominal Crunch" }));
   const detail = await topDialog();
   const places = within(detail.getByLabelText("เลือกเครื่อง"));
-  expect(places.getByRole("button", { name: "Jett" })).toBeTruthy();
-  expect(places.queryByRole("button", { name: /WE Fitness|Jett ·/ })).toBeNull();
+  // Buttons name the gym only, in the usual order, and never repeat the exercise name.
+  expect(places.getAllByRole("button").map((b) => b.textContent)).toEqual(["WE Fitness", "Jett", "เพิ่มเครื่องของท่านี้"]);
   expect(detail.getAllByRole("button", { name: "รูปหลัก" })).toHaveLength(1);
   expect(detail.queryByRole("button", { name: "เปิดรูปเครื่อง" })).toBeNull();
-  expect(detail.queryByRole("button", { name: "รูปถัดไป" })).toBeNull();
+  // Its own photo comes first; the illustration follows, marked as such; the legacy Jett photo is not repeated.
+  expect(detail.getByText(/^1 \/ \d · Jett$/)).toBeTruthy();
+  expect(detail.queryAllByRole("button", { name: /^เปิดรูป ภาพประกอบ$/ }).length).toBeGreaterThan(0);
+  expect(detail.queryAllByRole("button", { name: /^เปิดรูป (WE Fitness|Jett)$/ })).toEqual([]);
   expect((await allEntries()).find((entry) => entry.id === "jett-crunch")?.data).toEqual(other);
+});
+it("shows every gym's photos of an exercise in one row, labelled by gym, each picture once", async () => {
+  const press = { name: "Hip Thrust Machine", thai: "", group: "ก้น", setup: "", cues: "", loadMode: "total" };
+  await save("machine", { ...press, gym: "M Fitness", photoId: "p-m" }, "hip-m");
+  await save("machine", { ...press, gym: "WE Fitness", photoId: "p-we" }, "hip-we");
+  await save("photo", { label: "", mime: "image/jpeg", machineId: "hip-m" }, "p-m");
+  await save("photo", { label: "", mime: "image/jpeg", machineId: "hip-we" }, "p-we");
+  location.hash = "machines";
+  render(<App />);
+  fireEvent.click((await screen.findAllByRole("button", { name: /Hip Thrust Machine/ }))[0]);
+  const detail = await topDialog();
+  const places = within(detail.getByLabelText("เลือกเครื่อง"));
+  expect(places.getAllByRole("button").map((b) => b.textContent)).toEqual(["WE Fitness", "M Fitness", "เพิ่มเครื่องของท่านี้"]);
+  const counter = detail.getByText(/^1 \/ 2 · /).textContent!;
+  const first = counter.endsWith("WE Fitness") ? "WE Fitness" : "M Fitness";
+  fireEvent.click(detail.getByRole("button", { name: "รูปถัดไป" }));
+  expect(detail.getByText(`2 / 2 · ${first === "WE Fitness" ? "M Fitness" : "WE Fitness"}`)).toBeTruthy();
 });
 it("removes an unused gym from every list but never one with history", async () => {
   const machine = { name: "Old Press", thai: "", group: "อก", setup: "", cues: "", loadMode: "total" };
