@@ -63,7 +63,7 @@ export default function TrainingStats({ entries }: { entries: Entry[] }) {
         </div>
         <BodyMap sets={sets} />
         {Object.keys(sets).length ? <MuscleBars sets={sets} /> : <p className="muted">ยังไม่มีเซตที่ยืนยันในช่วงนี้</p>}
-        <p className="muted">นับเซตจริง ไม่รวมวอร์มและยืดเหยียด · กล้ามเนื้อหลัก 1 เซต ตัวช่วยครึ่งเซต
+        <p className="muted">นับทุกเซตที่ยืนยัน ไม่รวมยืดเหยียด · กล้ามเนื้อหลัก 1 เซต ตัวช่วยครึ่งเซต
           {unknown > 0 && ` · อีก ${unknown} เซตยังไม่ระบุกล้ามเนื้อ`}</p>
       </section>
     </>

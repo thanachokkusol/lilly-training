@@ -92,7 +92,7 @@ export default function TrainingCalendar({ entries }: { entries: Entry[] }) {
                         {exercise.originalName && names.has(exercise.machineId) && names.get(exercise.machineId) !== exercise.originalName && (
                           <small className="muted">บันทึกเดิม: {exercise.originalName}</small>
                         )}
-                        <ul>{done.map((set) => <li key={set.id}>{formatSet(set, exercise.loadMode)}{set.warmup && " (วอร์ม)"}</li>)}</ul>
+                        <ul>{done.map((set) => <li key={set.id}>{formatSet(set, exercise.loadMode)}</li>)}</ul>
                       </div>
                     );
                   })}

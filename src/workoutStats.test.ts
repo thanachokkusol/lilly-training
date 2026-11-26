@@ -17,7 +17,7 @@ const machine = (id: string, name: string, group = "อื่น ๆ"): Entry =>
   ({ id, kind: "machine", version: 1, dirty: false, updatedAt: "", data: { name, group, gym: "WE Fitness", setup: "", loadMode: "total" } });
 
 describe("totals", () => {
-  it("counts confirmed working sets only, and both sides of a per-side load", () => {
+  it("counts every confirmed set, an old warm-up flag included, and both sides of a per-side load", () => {
     const data = session("a", "2026-11-20", [
       exercise("press", [set(10, 12), set(10, 12, { warmup: true }), set(10, 12, { done: false })], "per-side"),
       exercise("row", [set(30, 10)]),
@@ -25,8 +25,8 @@ describe("totals", () => {
       exercise("home-stretch-doorway", [set(null, 3, { holdSeconds: 10 })], "bodyweight"),
       exercise("push", [set(null, 20)], "bodyweight"),
     ]).data;
-    expect(sessionVolume(data)).toBe(20 * 12 + 300);
-    expect(sessionSets(data)).toBe(3);
+    expect(sessionVolume(data)).toBe(2 * 20 * 12 + 300);
+    expect(sessionSets(data)).toBe(4);
   });
   it("leaves the duration unknown without a start or when the workout was left open", () => {
     const base = session("a", "2026-11-20", []).data;
@@ -44,7 +44,7 @@ describe("records", () => {
     expect(setRecords(past, set(32.5, 10), "total")).toEqual(["weight", "max", "volume"]);
     expect(setRecords(past, set(32.5, 3), "total")).toEqual(["weight"]);
     expect(setRecords(past, set(30, 12), "total")).toEqual(["max", "volume"]);
-    expect(setRecords(past, set(40, 10, { warmup: true }), "total")).toEqual([]);
+    expect(setRecords(past, set(40, 10, { warmup: true }), "total")).toEqual(["weight", "max", "volume"]);
   });
   it("compares per-side entries with totals by their real load", () => {
     expect(setRecords(past, set(15, 10), "per-side")).toEqual([]);

@@ -72,13 +72,22 @@ it("starts a stretch from a normal Strength tile under the home location", async
     clock.mockRestore();
   }
 });
-it("selects all three home stretches from the Chest Stretch program", async () => {
+it("selects the three chest stretches, Cobra and Child's Pose from the Chest Stretch program", async () => {
   location.hash = "#today";
   render(<App />);
-  fireEvent.click(await screen.findByRole("button", { name: /Chest Stretch ·? ?3 ท่า/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /Chest Stretch ·? ?5 ท่า/ }));
   const plan = await topDialog();
   expect((plan.getByLabelText("ยิมที่ฝึก") as HTMLSelectElement).value).toBe("ที่บ้าน");
-  expect(plan.getByRole("button", { name: /เริ่มบันทึก 3 ท่า/ })).toBeTruthy();
+  expect(plan.getByRole("button", { name: /เริ่มบันทึก 5 ท่า/ })).toBeTruthy();
+  expect(plan.queryAllByRole("alert")).toEqual([]);
+});
+it("adds Cobra and Child's Pose to a Chest Stretch program saved with the first three moves", async () => {
+  await save("routine", { title: "Chest Stretch", days: [], note: "เดิม",
+    machineIds: ["home-stretch-wall-elbow", "home-stretch-wall-straight", "home-stretch-doorway"] }, "routine-home-chest-stretch");
+  location.hash = "#today";
+  render(<App />);
+  await waitFor(async () => expect((await allEntries()).find((e) => e.id === "routine-home-chest-stretch")!.data.machineIds)
+    .toEqual(["home-stretch-wall-elbow", "home-stretch-wall-straight", "home-stretch-doorway", "home-stretch-cobra", "home-stretch-child"]));
 });
 it("shows both workout types on the actual date and opens the day's details", async () => {
   const date = today().slice(0, 7) + "-02";
@@ -640,14 +649,13 @@ it("attaches a pasted image to the cardio log as evidence", async () => {
     cleanup();
   }
 });
-it("logs every exercise on one screen with last time beside each set, rests by itself and reports a record", async () => {
+it("logs every exercise on one screen with last time as the hint, rests by itself and reports a record", async () => {
   const press = { name: "Chest Press", thai: "", gym: "WE Fitness", group: "อก", setup: "", cues: "", loadMode: "total" };
   await save("machine", press, "press");
   await save("machine", { ...press, name: "Seated Cable Row", group: "หลัง" }, "row");
   await save("session", {
     date: "2026-01-10", title: "Old", status: "completed", note: "", gym: "WE Fitness", exercises: [
       { machineId: "press", loadMode: "total", setup: "", note: "", sets: [
-        { id: "w", load: 10, reps: 15, warmup: true, done: true },
         { id: "a", load: 20, reps: 12, warmup: false, done: true },
         { id: "b", load: 22.5, reps: 10, warmup: false, done: true }] }],
   }, "old");
@@ -658,9 +666,12 @@ it("logs every exercise on one screen with last time beside each set, rests by i
   fireEvent.click(await screen.findByRole("button", { name: /Push Pull.*WE · 2 ท่า/ }));
   fireEvent.click(await screen.findByRole("button", { name: "เริ่มบันทึก 2 ท่า" }));
   await screen.findByText(/เสร็จ 0\/2 ท่า/);
-  // The warm-up from last time is not offered for a working set.
-  fireEvent.click(screen.getByRole("button", { name: "Chest Press เซต 1 ใช้ค่าครั้งก่อน 20×12" }));
-  expect(screen.getByRole("spinbutton", { name: "Chest Press เซต 1 น้ำหนัก" })).toHaveProperty("value", "20");
+  // Last time fills the row and stays as the faint hint; there is no separate column for it.
+  const firstLoad = screen.getByRole("spinbutton", { name: "Chest Press เซต 1 น้ำหนัก" });
+  expect(firstLoad).toHaveProperty("value", "20");
+  expect(firstLoad.getAttribute("placeholder")).toBe("20");
+  expect(screen.queryByText("ครั้งก่อน", { selector: ".set-head span" })).toBeNull();
+  expect(screen.queryByRole("button", { name: /ใช้ค่าครั้งก่อน/ })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "ยืนยันChest Press เซต 1" }));
   expect(await screen.findByText(/^พัก 0:4[45]$/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "เพิ่ม 15 วิ" }));
@@ -686,6 +697,46 @@ it("logs every exercise on one screen with last time beside each set, rests by i
   expect(stored.exercises[0].sets.map((set: any) => [set.load, set.reps, set.done, set.type])).toEqual([[20, 12, true, undefined], [25, 12, true, "failure"]]);
   expect(stored.exercises.map((x: any) => x.superset)).toEqual([1, 1]);
   expect(stored.exercises[1].sets[0].done).toBe(false);
+});
+it("keeps a program exercise that has no machine at this gym and offers to create it", async () => {
+  const press = { name: "Chest Press", thai: "", gym: "WE Fitness", group: "อก", setup: "", cues: "", loadMode: "total" };
+  await save("machine", press, "press");
+  await save("machine", { ...press, name: "Seated Cable Row", group: "หลัง", gym: "M Fitness" }, "row-m");
+  await save("machine", { ...press, name: "Leg Press", group: "ขา", archived: true }, "leg-old");
+  await save("routine", { title: "Mixed", machineIds: ["press", "row-m", "leg-old"], days: [], folder: "WE",
+    targets: { "row-m": { sets: 3, reps: 10 } } }, "routine-mixed");
+  location.hash = "#today";
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: /Mixed.*WE · 3 ท่า/ }));
+  const alerts = await screen.findAllByRole("alert");
+  expect(alerts.map((a) => a.textContent)).toEqual(expect.arrayContaining([
+    expect.stringMatching(/Seated Cable Row.*ยังไม่มีเครื่องที่ WE Fitness/),
+    expect.stringMatching(/Leg Press.*เก็บเข้าคลังหรือลบแล้ว/),
+  ]));
+  expect(screen.getByRole("button", { name: /เริ่มบันทึก 1 ท่า/ })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "สร้างเครื่องที่นี่" }));
+  expect(await screen.findByRole("button", { name: /เริ่มบันทึก 2 ท่า/ })).toBeTruthy();
+  const made = (await allEntries()).find((e) => e.kind === "machine" && e.data.name === "Seated Cable Row" && e.data.gym === "WE Fitness");
+  expect(made).toBeTruthy();
+});
+it("deletes any set, asks once more before deleting a confirmed one, and has no warm-up option", async () => {
+  await save("machine", { name: "Chest Press", thai: "", gym: "WE Fitness", group: "อก", setup: "", cues: "", loadMode: "total" }, "press");
+  await save("session", { date: today(), title: "Delete sets", status: "draft", note: "", exercises: [
+    { machineId: "press", loadMode: "total", setup: "", note: "", sets: [
+      { id: "a", load: 20, reps: 12, warmup: true, done: true },
+      { id: "b", load: 20, reps: null, warmup: false, done: false }] }] }, "delete-sets");
+  location.hash = "#today";
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "ทำต่อจากที่ค้างไว้" }));
+  // An old warm-up flag shows as an ordinary numbered set.
+  expect(await screen.findByRole("button", { name: "Chest Press เซต 1 ชนิด ปกติ" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Chest Press เซต 1 ชนิด ปกติ" }));
+  expect(screen.queryByRole("button", { name: "วอร์ม" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "ลบChest Press เซต 2" }));
+  await waitFor(() => expect(screen.queryByRole("spinbutton", { name: "Chest Press เซต 2 น้ำหนัก" })).toBeNull());
+  fireEvent.click(screen.getByRole("button", { name: "ลบChest Press เซต 1" }));
+  fireEvent.click(await screen.findByRole("button", { name: "ยืนยันลบChest Press เซต 1" }));
+  await waitFor(async () => expect((await allEntries()).find((e) => e.id === "delete-sets")!.data.exercises[0].sets).toEqual([]));
 });
 it("copies the workout summary without clipboard permission, and shows the text when the browser blocks every way", async () => {
   await save("machine", { name: "Leg Press", thai: "", gym: "WE Fitness", group: "ขา", setup: "", cues: "", loadMode: "total" }, "leg");

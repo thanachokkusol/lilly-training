@@ -100,3 +100,4 @@ npm audit
 - Doorway Chest Stretch and both Wall Chest Stretches are original renders made for this app, posed on the Mixamo "X Bot" mannequin.
 - Stiff-Legged Dumbbell Deadlift and the leg, glute, calf and back stretch photos from [Free Exercise DB](https://github.com/yuhonas/free-exercise-db) (Unlicense).
 - Concentration Curl, Reverse Curl, Lying Dumbbell Triceps Extension, and Crunch photos from [Free Exercise DB](https://github.com/yuhonas/free-exercise-db). Side-Lying Hip Abduction illustrations by [Marvin Nazari](https://github.com/MarvinNazari/exercise-images), CC0 1.0, resized and converted to JPEG.
+- Cobra Stretch illustration by [Marvin Nazari](https://github.com/MarvinNazari/exercise-images) (`cobra-stretch/hold.webp`), CC0 1.0, resized and converted to JPEG.

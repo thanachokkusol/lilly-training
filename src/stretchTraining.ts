@@ -4,7 +4,7 @@ import type { Machine } from "./types";
 export function stretchTiming(id: string) {
   const chest = /^home-stretch-(wall-|doorway)/.test(id);
   return {
-    both: id === "home-stretch-doorway" || id === "home-stretch-child",
+    both: ["home-stretch-doorway", "home-stretch-child", "home-stretch-cobra"].includes(id),
     hold: chest ? 10 : 20,
     reps: chest ? 3 : 2,
     rest: chest ? 10 : 5,
@@ -22,6 +22,7 @@ export const stretchMoves = [
   ["home-stretch-figure-four", "Figure-Four Glute Stretch", "ยืดก้น ไขว่ขาเลขสี่", "นอนหงาย วางข้อเท้าข้างหนึ่งบนเข่าอีกข้าง จับหลังต้นขาขาล่างแล้วดึงเข้าหาอก ศีรษะและไหล่วางบนพื้น"],
   ["home-stretch-calf", "Wall Calf Stretch", "ยืดน่อง พิงกำแพง", "ยันมือกับกำแพง ก้าวขาข้างหนึ่งไปด้านหลัง เข่าหลังตรง กดส้นเท้าติดพื้น แล้วโน้มตัวไปด้านหน้า"],
   ["home-stretch-child", "Child's Pose", "ยืดหลัง ท่าเด็ก", "คุกเข่า นั่งก้นลงหาส้นเท้า ยืดแขนไปด้านหน้า วางหน้าผากใกล้พื้น หายใจช้า ๆ ข้ามท่านี้ถ้าเข่าไม่สบาย"],
+  ["home-stretch-cobra", "Cobra Stretch", "ยืดหน้าท้อง ท่างู", "นอนคว่ำ วางฝ่ามือใต้ไหล่ ค่อย ๆ ดันอกขึ้น สะโพกและหน้าขาแนบพื้น ไหล่ห่างจากหู ยกเท่าที่หลังล่างไม่เจ็บ"],
 ].map(([id, name, thai, instruction]) => ({
   id, name, thai, group: "Stretch", loadMode: "bodyweight",
   setup: stretchTiming(id).both ? `สองข้างพร้อมกัน · ${stretchTiming(id).reps} ครั้ง`
@@ -29,10 +30,17 @@ export const stretchMoves = [
   cues: `${instruction}\n${caution}`,
 } satisfies Omit<Machine, "gym"> & { id: string }));
 
+const chestStretchFirstMoves = ["home-stretch-wall-elbow", "home-stretch-wall-straight", "home-stretch-doorway"];
+const chestStretchNote = "ยืดอก 3 ท่า: ค้าง 10 วินาที × 3 ครั้ง พัก 10 วินาที · Cobra และ Child's Pose: ค้าง 20 วินาที × 2 ครั้ง · เปลี่ยนท่า 15 วินาที";
+/** The program as first shipped with three moves; the owner added Cobra and Child's Pose on 26 Nov 2026. */
+export function needsChestStretchUpgrade(data: { machineIds?: unknown } | undefined) {
+  const ids = data?.machineIds;
+  return Array.isArray(ids) && ids.length === chestStretchFirstMoves.length && chestStretchFirstMoves.every((id, i) => ids[i] === id);
+}
 export const chestStretchRoutine = {
   id: "routine-home-chest-stretch",
-  data: { title: "Chest Stretch", machineIds: ["home-stretch-wall-elbow", "home-stretch-wall-straight", "home-stretch-doorway"], days: [],
-    note: "ค้าง 10 วินาที · พัก 10 วินาที · เปลี่ยนท่า 15 วินาที" },
+  data: { title: "Chest Stretch", machineIds: [...chestStretchFirstMoves, "home-stretch-cobra", "home-stretch-child"], days: [],
+    note: chestStretchNote },
 };
 /** After the home leg, core and chest program; about 12 minutes in the timer. */
 export const cooldownStretches = ["home-stretch-hip-flexor", "home-stretch-quad", "home-stretch-hamstring",

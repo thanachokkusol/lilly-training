@@ -4,7 +4,7 @@ import { isStretch } from "./stretchTraining";
 import type { Entry, ExerciseLog, LoadMode, Machine, Session, SetLog } from "./types";
 
 /** A confirmed set that counts. Stretches are left out by exercise, not by set. */
-export const isWorkingSet = (set: SetLog) => set.done && !set.warmup;
+export const isWorkingSet = (set: SetLog) => set.done;
 const numeric = (mode: LoadMode) => mode === "total" || mode === "per-side";
 export const setVolume = (set: SetLog, mode: LoadMode) =>
   numeric(mode) && set.load !== null && set.reps && set.meters == null ? totalLoad(set, mode)! * set.reps : 0;

@@ -6,7 +6,7 @@ import { planSessionMove, type MachineMove } from "./migration";
 import { exerciseGuideFrames, homeCoachRoutine, homeLegsRoutine, homeGym, homeMoves, isObsoleteHomeRoutine } from "./homeTraining";
 import { noGym } from "./catalog";
 import { gymCatalogId, gymInUse, gymsFor, type Gym } from "./gyms";
-import { chestStretchRoutine, stretchMoves } from "./stretchTraining";
+import { chestStretchRoutine, needsChestStretchUpgrade, stretchMoves } from "./stretchTraining";
 const loadZip = () => import("jszip").then((m) => m.default);
 export const sandbox =
   typeof location !== "undefined" &&
@@ -113,6 +113,11 @@ export async function addMissingHomeTraining(obsoleteId?: string) {
   missing.forEach(validateEntry);
   const obsolete = obsoleteId ? await tx.store.get(obsoleteId) as Entry | undefined : undefined;
   const changes = missing.map((entry) => tx.store.add(entry));
+  const chest = await tx.store.get(chestStretchRoutine.id) as Entry | undefined;
+  if (chest && !chest.deleted && needsChestStretchUpgrade(chest.data)) changes.push(tx.store.put({
+    ...chest, updatedAt, dirty: true,
+    data: { ...chest.data, machineIds: chestStretchRoutine.data.machineIds, note: chestStretchRoutine.data.note },
+  }));
   if (obsolete && isObsoleteHomeRoutine(obsolete)) changes.push(tx.store.put({
     ...obsolete, data: { ...obsolete.data, retiredBy: homeCoachRoutine.id }, updatedAt, dirty: true, deleted: true,
   }));

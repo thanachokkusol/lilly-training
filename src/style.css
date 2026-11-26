@@ -3091,14 +3091,52 @@ summary {
 }
 .set-table .set-head,
 .set-table .set-row {
-  grid-template-columns: 38px minmax(0, 1fr) minmax(58px, 0.9fr) minmax(48px, 0.7fr) 44px;
+  grid-template-columns: 38px minmax(58px, 1fr) minmax(48px, 0.8fr) 44px 38px;
   gap: 6px;
   align-items: center;
 }
 .set-table.with-rpe .set-head,
 .set-table.with-rpe .set-row {
-  grid-template-columns: 34px minmax(0, 1fr) minmax(50px, 0.9fr) minmax(42px, 0.7fr) 50px 42px;
+  grid-template-columns: 34px minmax(50px, 1fr) minmax(42px, 0.8fr) 50px 42px 36px;
   gap: 4px;
+}
+/* The confirm button looks pressable before it is ticked. */
+.set-table .set-check {
+  width: 42px;
+  height: 42px;
+  background: #fff;
+  border: 2px solid #8aa37a;
+  color: #527044;
+}
+.set-table .set-check.checked {
+  background: #527044;
+  border-color: #527044;
+  color: #fff;
+}
+.set-table .set-remove {
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid #e6d6d3;
+  border-radius: 9px;
+  background: #fff;
+  color: #9b4a40;
+  font-size: 12px;
+  justify-self: center;
+}
+.set-table .set-remove.confirm {
+  width: 38px;
+  background: #b4473a;
+  border-color: #b4473a;
+  color: #fff;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 .set-table .set-head {
   font-size: 12px;
@@ -3601,4 +3639,43 @@ button.set-previous:disabled {
 .catalog-add {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr);
+}
+.read-edit {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0;
+}
+.read-edit-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.read-edit p {
+  margin: 0;
+}
+.how-to.merged {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #f6f7f1;
+  border: 1px solid #e3e6da;
+}
+.how-to.merged .read-edit {
+  margin-top: 0;
+}
+.notice.warning {
+  background: #fdecea;
+  border-color: #efb9b2;
+  color: #7a2a21;
+}
+.notice.warning p {
+  margin: 0 0 6px;
+}
+.sound-cues {
+  display: grid;
+  gap: 8px;
+  padding-left: 26px;
+}
+.sound-cues .secondary {
+  justify-self: start;
 }

@@ -132,6 +132,7 @@ const guides: Record<string, string> = {
   "figure-four glute stretch": "Ankle_On_The_Knee",
   "wall calf stretch": "Calf_Stretch_Hands_Against_Wall",
   "child's pose": "Childs_Pose",
+  "cobra stretch": "Cobra_Stretch",
   "goblet squat": "Goblet_Squat",
   "dumbbell floor press": "Dumbbell_Floor_Press",
   "bent over two-dumbbell row": "Bent_Over_Two-Dumbbell_Row",
@@ -173,7 +174,7 @@ export function exerciseGuideFrames(guide: string) {
   // Frame 0 of these was unclear or wrong; new numbers replace copies already saved as photos.
   if (["Doorway_Chest_Stretch", "Wall_Chest_Stretch_Straight", "Wall_Chest_Stretch_Elbow"].includes(guide)) return [1, 2];
   return ["Kettlebell_Upright_Row", "Kneeling_Hip_Flexor", "Side_Lying_Quad_Stretch",
-    "Seated_Floor_Hamstring_Stretch", "Ankle_On_The_Knee", "Calf_Stretch_Hands_Against_Wall", "Childs_Pose"]
+    "Seated_Floor_Hamstring_Stretch", "Ankle_On_The_Knee", "Calf_Stretch_Hands_Against_Wall", "Childs_Pose", "Cobra_Stretch"]
     .includes(guide) ? [0] : [0, 1];
 }
 

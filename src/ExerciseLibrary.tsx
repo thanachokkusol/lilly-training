@@ -50,6 +50,12 @@ function Steps({ item, images }: { item: CatalogItem; images: boolean }) {
     </>
   );
 }
+/** The universal steps without their own box, for screens that merge them with the machine's notes. */
+export function CatalogSteps({ catalogId, images }: { catalogId: string; images: boolean }) {
+  const items = useCatalog();
+  const item = items?.find(({ id }) => id === catalogId);
+  return item ? <Steps item={item} images={images} /> : null;
+}
 /** The universal how-to under a machine's own notes. Pictures only when the machine has none of its own. */
 export function HowTo({ catalogId, images, open }: { catalogId: string; images: boolean; open: boolean }) {
   const items = useCatalog();

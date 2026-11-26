@@ -34,7 +34,7 @@ export function exerciseProgress(entries: Entry[], machineIds: string[]) {
       for (const exercise of (entry.data as Session).exercises) {
         if (!allowed.has(exercise.machineId) || !["total", "per-side"].includes(exercise.loadMode)) continue;
         for (const set of exercise.sets) {
-          if (!set.done || set.warmup || set.load === null || set.load <= 0 || !set.reps || set.reps <= 0) continue;
+          if (!set.done || set.load === null || set.load <= 0 || !set.reps || set.reps <= 0) continue;
           const kg = totalLoad(set, exercise.loadMode)!;
           const point = { kg, reps: set.reps, estimate: kg * (1 + set.reps / 30) };
           const result = results.get(exercise.machineId);
@@ -202,7 +202,7 @@ export function bestSet(entries: Entry[], machineId: string) {
   let best: { date: string; set: SetLog; mode: LoadMode } | null = null;
   for (const h of machineHistory(entries, machineId))
     for (const s of h.exercise.sets) {
-      if (!s.done || s.warmup || s.load === null) continue;
+      if (!s.done || s.load === null) continue;
       const load = totalLoad(s, h.exercise.loadMode)!;
       const bestLoad = best ? totalLoad(best.set, best.mode)! : 0;
       const better =
@@ -274,7 +274,7 @@ export function weightLines(entries: Entry[], date: string, activity: "all" | "s
       const sets = done
         .map(
           (s) =>
-            `${formatSet(s, x.loadMode)}${s.warmup ? " (วอร์ม)" : ""}`,
+            formatSet(s, x.loadMode),
         )
         .join(" / ");
       let line = `${lines.length + 1}. ${m?.name ?? "เครื่อง"}: ${sets}`;

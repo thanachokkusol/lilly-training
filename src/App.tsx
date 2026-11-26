@@ -32,6 +32,7 @@ import {
   Camera,
   Download,
   Copy,
+  Pencil,
   Footprints,
   Scale,
   RefreshCw,
@@ -140,17 +141,18 @@ import { reportUrl } from "./bodyDetails";
 import { cardioMix } from "./cardioMix";
 import Stretch, { type StretchResult } from "./Stretch";
 import { planText } from "./stretchPlan";
-import { chestStretchRoutine, isStretch, stretchMoves } from "./stretchTraining";
+import { chestStretchRoutine, isStretch, needsChestStretchUpgrade, stretchMoves } from "./stretchTraining";
 import StrengthTile from "./StrengthTile";
 import SetTable from "./SetTable";
+import { cueKeys, playCue, restCue, restStage, type RestCue } from "./restSound";
 import { copyText } from "./clipboard";
 import WorkoutSummary, { MachineInsights, WorkoutNumbers } from "./WorkoutSummary";
-import { CatalogDetail, CatalogSearch, HowTo, ImageCredit, catalogImageUrl, useCatalog } from "./ExerciseLibrary";
+import { CatalogDetail, CatalogSearch, CatalogSteps, HowTo, ImageCredit, catalogImageUrl, useCatalog } from "./ExerciseLibrary";
 import { equipmentLabels, matchesExercise, noGym, searchCatalog, type CatalogItem } from "./catalog";
 import { catalogLinks } from "./catalogLinks";
 import { identifiedJettMachine, isPendingMachine, jettIdentification, withoutDuplicateJettCards } from "./pendingMachines";
 import { catalogIdOf, categoryLabel, categoryOf, legacyGroup, legMuscles, muscleIds, muscleLabels, musclesFor, muscleText, stretchCategory } from "./muscles";
-import { kg, recordLabels, sessionSets, sessionVolume, setRecords, setsBefore, previousExercise, warmupSets } from "./workoutStats";
+import { kg, recordLabels, sessionSets, sessionVolume, setRecords, setsBefore, previousExercise } from "./workoutStats";
 type Context = {
   entries: Entry[];
   refresh: () => Promise<void>;
@@ -187,7 +189,7 @@ function exerciseFor(
   const last = latestExercise(entries, machine.id, date, sessionId)?.exercise;
   const comparable = last && (last.loadMode === m.loadMode ||
     (["total", "per-side"].includes(last.loadMode) && ["total", "per-side"].includes(m.loadMode)));
-  const previous = comparable ? last.sets.filter((set) => set.done && !set.warmup) : [];
+  const previous = comparable ? last.sets.filter((set) => set.done) : [];
   const suggestedSets = last?.reportedOnly ? previous.slice(0, 1) : previous;
   if (target) return {
     machineId: machine.id,
@@ -656,7 +658,8 @@ export default function App() {
     (cachedOwner && cachedOwner !== authUser));
   const ready = loaded && (!canSync || !online || initialSync === authUser);
   const needsHomeTraining = [homeCoachRoutine, homeLegsRoutine, chestStretchRoutine, ...homeMoves, ...stretchMoves].some(({ id }) =>
-    !entries.some((entry) => entry.id === id));
+    !entries.some((entry) => entry.id === id)) ||
+    entries.some((entry) => entry.id === chestStretchRoutine.id && !entry.deleted && needsChestStretchUpgrade(entry.data));
   const obsoleteHomeRoutineId = entries.find(isObsoleteHomeRoutine)?.id;
   const octoberWalkIds = entries.filter(octoberWalkWeek).map((entry) => entry.id).join(",");
   useEffect(() => {
@@ -1119,23 +1122,6 @@ function Today({ nav }: { nav: (p: string) => void }) {
           unit="กม."
         />
       </div>
-      <div className="section-title">
-        <h2>Strength</h2>
-        <button className="text-button" onClick={() => nav("machines")}>
-          ทั้งหมด <ChevronRight size={17} />
-        </button>
-      </div>
-      <div className="machine-grid compact">
-        {exerciseCards(entries, machines)
-          .slice(0, 6)
-          .map((e) => (
-            <MachineTile
-              key={e.id}
-              e={e}
-              onClick={() => setMachineDetail(e.id)}
-            />
-          ))}
-      </div>
       {!machines.length && (
         <Empty
           text="ยังไม่มีท่า เพิ่มท่าแรกได้ที่หน้า Strength"
@@ -1180,6 +1166,7 @@ function Today({ nav }: { nav: (p: string) => void }) {
       )}
       {start && (
         <StartSession
+          initialRoutine={routine ?? undefined}
           initial={routine?.data.machineIds}
           initialTitle={routine?.data.title}
           initialNote={routine?.data.note}
@@ -1263,6 +1250,53 @@ function workoutMessage(s: Session, entries: Entry[]) {
   );
   return `🏋️ อัปเดตเวท ${dateLabel(s.date)} (${lines.length} ท่า)\n${lines.join("\n")}${s.note.trim() ? `\n\n${s.note.trim()}` : ""}`;
 }
+/** The same exercise at another gym, reusing an existing machine there if one appeared meanwhile. */
+async function createMachineAtGym(source: Entry, gym: string, file?: File) {
+  const m = source.data as Machine;
+  const existing = (await allEntries()).find((entry) =>
+    entry.kind === "machine" && !entry.deleted && !entry.data.archived &&
+    entry.data.gym === gym && exerciseKey(entry.data) === exerciseKey(m),
+  );
+  if (existing) return existing;
+  const id = uid();
+  const photoId = file ? await addPhoto(file, `${gym} · ${m.name}`) : undefined;
+  if (photoId) await save("photo", { label: m.name, mime: "image/jpeg", machineId: id }, photoId);
+  const machine: Machine = {
+    exerciseId: m.exerciseId,
+    name: m.name,
+    thai: m.thai,
+    aliases: m.aliases,
+    group: m.group,
+    category: m.category,
+    catalogId: m.catalogId,
+    trains: m.trains,
+    record: m.record,
+    gym,
+    setup: "",
+    cues: "",
+    loadMode: m.record || m.loadMode === "bodyweight" || m.loadMode === "assistance" ? m.loadMode : "total",
+    photoId,
+  };
+  return save("machine", machine, id);
+}
+
+/** A program's exercises at one gym: the machine there for each, and the ones that have none. */
+function routineAtGym(entries: Entry[], machineIds: string[], gym: string) {
+  const active = entries.filter((e) => e.kind === "machine" && !e.deleted && !e.data.archived && !isPendingMachine(e));
+  const picked: { from: string; id: string }[] = [];
+  const gaps: { from: string; source?: Entry; name: string; reason: "missing" | "retired" | "unknown" }[] = [];
+  for (const from of machineIds) {
+    const own = entries.find((e) => e.id === from && e.kind === "machine");
+    if (!own) { gaps.push({ from, name: "ท่าที่ไม่พบในเครื่องนี้", reason: "unknown" }); continue; }
+    const here = own.data.gym === gym && active.includes(own) ? own :
+      active.find((e) => e.data.gym === gym && exerciseKey(e.data) === exerciseKey(own.data));
+    if (here) { if (!picked.some((p) => p.id === here.id)) picked.push({ from, id: here.id }); continue; }
+    const retired = own.deleted || own.data.archived;
+    gaps.push({ from, source: retired ? undefined : own, name: own.data.name, reason: retired ? "retired" : "missing" });
+  }
+  return { picked, gaps };
+}
+
 function MissingGymMachines({
   gym, entries, choose, query = "",
 }: {
@@ -1284,35 +1318,7 @@ function MissingGymMachines({
     creating.current = true;
     void run(async () => {
       try {
-        const m = source.data as Machine;
-        const existing = (await allEntries()).find((entry) =>
-          entry.kind === "machine" && !entry.deleted && !entry.data.archived &&
-          entry.data.gym === gym && exerciseKey(entry.data) === exerciseKey(m),
-        );
-        if (existing) {
-          choose(existing);
-          return;
-        }
-        const id = uid();
-        const photoId = file ? await addPhoto(file, `${gym} · ${m.name}`) : undefined;
-        if (photoId) await save("photo", { label: m.name, mime: "image/jpeg", machineId: id }, photoId);
-        const machine: Machine = {
-          exerciseId: m.exerciseId,
-          name: m.name,
-          thai: m.thai,
-          aliases: m.aliases,
-          group: m.group,
-          category: m.category,
-          catalogId: m.catalogId,
-          trains: m.trains,
-          record: m.record,
-          gym,
-          setup: "",
-          cues: "",
-          loadMode: m.record || m.loadMode === "bodyweight" || m.loadMode === "assistance" ? m.loadMode : "total",
-          photoId,
-        };
-        choose(await save("machine", machine, id));
+        choose(await createMachineAtGym(source, gym, file));
       } finally {
         creating.current = false;
       }
@@ -2364,9 +2370,11 @@ function StartSession({
   initialTitle,
   initialNote,
   initialTargets,
+  initialRoutine,
 }: {
   close: () => void;
   done: (id: string) => void;
+  initialRoutine?: { id?: string; data: { machineIds: string[]; targets?: Record<string, ExerciseTarget> } };
   initial?: string[];
   initialTitle?: string;
   initialNote?: string;
@@ -2394,6 +2402,28 @@ function StartSession({
   const machines = allMachines.filter((e) => e.data.gym === gym);
   const selectedMachines = selection.filter((id) => machines.some((m) => m.id === id));
   const routines = entries.filter((e) => e.kind === "routine" && !e.deleted && !isObsoleteHomeRoutine(e));
+  const [routineId, setRoutineId] = useState<string | null>(null);
+  const [gaps, setGaps] = useState<ReturnType<typeof routineAtGym>["gaps"]>([]);
+  // A program never loses an exercise quietly: each one maps to this gym's machine or is listed as missing.
+  function applyRoutine(r: { id?: string; data: { machineIds: string[]; targets?: Record<string, ExerciseTarget> } }, at: string) {
+    const { picked, gaps } = routineAtGym(entries, r.data.machineIds, at);
+    const planned = r.data.targets ?? {};
+    setRoutineId(r.id ?? null);
+    setGaps(gaps);
+    setSelection(picked.map((p) => p.id));
+    setTargets(Object.fromEntries(picked.filter((p) => planned[p.from]).map((p) => [p.id, planned[p.from]])));
+  }
+  useEffect(() => {
+    if (initialRoutine && gym) applyRoutine(initialRoutine, gym);
+  }, []);
+  const addGap = (gap: (typeof gaps)[number]) => void run(async () => {
+    const made = await createMachineAtGym(gap.source!, gym);
+    const r = routines.find((item) => item.id === routineId) ?? initialRoutine;
+    const planned = r?.data.targets?.[gap.from];
+    setGaps((current) => current.filter((item) => item !== gap));
+    setSelection((current) => current.includes(made.id) ? current : [...current, made.id]);
+    if (planned) setTargets((current) => ({ ...current, [made.id]: planned }));
+  }, "เพิ่มเครื่องที่ยิมนี้แล้ว");
   return (
     <Modal title="เริ่มฝึก" close={close}>
       <div className="form">
@@ -2411,7 +2441,9 @@ function StartSession({
           <Field label="ยิมที่ฝึก">
             <select value={gym} onChange={(e) => {
               setGym(e.target.value);
-              setSelection([]);
+              const r = routines.find((item) => item.id === routineId);
+              if (r) applyRoutine(r, e.target.value);
+              else setSelection([]);
             }}>
               {!gyms.length && <option value="">เพิ่มยิมในหน้าตั้งค่าก่อน</option>}
               {gyms.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
@@ -2426,6 +2458,8 @@ function StartSession({
                 setTitle(t);
                 setRoutineNote("");
                 setTargets({});
+                setRoutineId(null);
+                setGaps([]);
                 setSelection(
                   machines
                     .filter(
@@ -2450,14 +2484,12 @@ function StartSession({
               onClick={() => {
                 setTitle(r.data.title);
                 setRoutineNote(r.data.note ?? "");
-                setTargets(r.data.targets ?? {});
                 const routineMachines = allMachines.filter((machine) =>
                   r.data.machineIds.includes(machine.id) && gyms.some((item) => item.id === machine.data.gym));
                 const routineGym = routineMachines.find((machine) => machine.data.gym === gym)?.data.gym ??
-                  routineMachines[0]?.data.gym;
-                if (routineGym) setGym(routineGym);
-                setSelection(r.data.machineIds.filter((id: string) =>
-                  routineMachines.some((machine) => machine.id === id && machine.data.gym === routineGym)));
+                  routineMachines[0]?.data.gym ?? gym;
+                setGym(routineGym);
+                applyRoutine(r, routineGym);
               }}
             >
               {r.data.title}
@@ -2465,6 +2497,21 @@ function StartSession({
           ))}
         </div>
         {routineNote && <p className="notice preserve">{routineNote}</p>}
+        {gaps.map((gap) => (
+          <div className="notice warning" key={gap.from} role="alert">
+            <p>
+              <strong>{gap.name}</strong>{" "}
+              {gap.reason === "missing" ? `ยังไม่มีเครื่องที่ ${gymName(entries, gym)}` :
+                gap.reason === "retired" ? "เครื่องในโปรแกรมถูกเก็บเข้าคลังหรือลบแล้ว" : "ไม่พบเครื่องที่โปรแกรมอ้างถึง"}
+            </p>
+            <div className="upload-row">
+              {gap.source && <button type="button" className="secondary" onClick={() => addGap(gap)}>สร้างเครื่องที่นี่</button>}
+              <button type="button" className="text-button" onClick={() => setGaps((current) => current.filter((item) => item !== gap))}>
+                ข้ามท่านี้ / เลือกเครื่องอื่นจากรายการ
+              </button>
+            </div>
+          </div>
+        ))}
         <p>เลือกท่าตามลำดับที่จะเล่น</p>
         <input aria-label="ค้นหาท่าที่จะเลือก" placeholder="ค้นหาท่า" value={query} onChange={(e) => setQuery(e.target.value)} />
         {machines.filter((e) => selection.includes(e.id) ||
@@ -2583,17 +2630,10 @@ function startRest(sessionId: string, seconds: number) {
   } catch { /* The visible timer still works. */ }
   window.dispatchEvent(new CustomEvent("lilly-rest", { detail: { sessionId, seconds } }));
 }
-function restBeep() {
-  if (!restSound || document.hidden || readRestPreference("rest-sound") === "false") return;
-  for (const [at, pitch] of [[0, 880], [0.22, 1175]]) {
-    const tone = restSound.createOscillator(), volume = restSound.createGain();
-    tone.frequency.value = pitch;
-    volume.gain.setValueAtTime(0.18, restSound.currentTime + at);
-    volume.gain.exponentialRampToValueAtTime(0.001, restSound.currentTime + at + 0.2);
-    tone.connect(volume).connect(restSound.destination);
-    tone.start(restSound.currentTime + at);
-    tone.stop(restSound.currentTime + at + 0.2);
-  }
+function restBeep(cue: RestCue) {
+  if (!restSound || document.hidden || readRestPreference("rest-sound") === "false" ||
+    readRestPreference(cueKeys[cue]) === "false") return;
+  try { playCue(restSound, cue); } catch { /* The visible timer still works. */ }
 }
 const restChoices = [0, 30, 45, 60, 75, 90, 120, 150, 180, 240, 300];
 const restText = (seconds: number) => !seconds ? "ไม่จับเวลา" :
@@ -2605,6 +2645,8 @@ function WorkoutPreferences() {
   const [rest, setRest] = useState(defaultRest);
   const [rpe, setRpe] = useState(showRpe);
   const [sound, setSound] = useState(() => readRestPreference("rest-sound") !== "false");
+  const [cues, setCues] = useState(() => Object.fromEntries((Object.keys(cueKeys) as RestCue[])
+    .map((cue) => [cue, readRestPreference(cueKeys[cue]) !== "false"])) as Record<RestCue, boolean>);
   return (
     <section className="panel">
       <h2>การบันทึกเวท</h2>
@@ -2629,8 +2671,29 @@ function WorkoutPreferences() {
             setSound(e.target.checked);
             writeRestPreference("rest-sound", String(e.target.checked));
           }} />
-          เสียงเตือนเมื่อหมดเวลาพัก (ขณะเปิดแอปอยู่)
+          เสียงตัวจับเวลาพัก (ขณะเปิดแอปอยู่บนจอ)
         </label>
+        {sound && (
+          <div className="sound-cues">
+            {([["soon", "ติ๊ง เมื่อเหลือ 10 วิ"], ["end", "ติ๊ง-ติ๊ง เมื่อหมดเวลา"], ["over", "ติ๊ง ทุก 30 วิ เมื่อพักเกินเวลา"]] as const).map(([cue, text]) => (
+              <label className="check-label" key={cue}>
+                <input type="checkbox" checked={cues[cue]} onChange={(e) => {
+                  setCues({ ...cues, [cue]: e.target.checked });
+                  writeRestPreference(cueKeys[cue], String(e.target.checked));
+                }} />
+                {text}
+              </label>
+            ))}
+            <button type="button" className="secondary" onClick={() => {
+              try {
+                restSound ??= new AudioContext();
+                void restSound.resume();
+                playCue(restSound, "end");
+              } catch { /* No sound on this browser. */ }
+            }}>ทดสอบเสียง</button>
+            <small className="muted">iPhone: ดังเฉพาะตอนแอปเปิดอยู่บนจอ และอาจไม่ดังถ้าเปิดสวิตช์เงียบ</small>
+          </div>
+        )}
         <label className="check-label">
           <input type="checkbox" checked={rpe} onChange={(e) => {
             setRpe(e.target.checked);
@@ -2650,6 +2713,7 @@ function RestTimer({ sessionId }: { sessionId: string }) {
   const seconds = end === null ? 0 : Math.ceil((end - now) / 1000);
   const expired = end !== null && end <= now;
   function updateEnd(value: number | null) {
+    stage.current = value === null ? 0 : restStage(value, Date.now());
     writeRestPreference(key, value === null ? null : String(value));
     setNow(Date.now());
     setEnd(value);
@@ -2662,10 +2726,14 @@ function RestTimer({ sessionId }: { sessionId: string }) {
     window.addEventListener("lilly-rest", start);
     return () => window.removeEventListener("lilly-rest", start);
   }, [sessionId]);
+  // The stage already announced; a cue plays only when its moment has just passed on screen.
+  const stage = useRef(end === null ? 0 : restStage(end, Date.now()));
   useEffect(() => {
-    // Only when it runs out on screen, not when an old timer is opened again.
-    if (expired && end && Date.now() - end < 1500) restBeep();
-  }, [expired]);
+    if (end === null) { stage.current = 0; return; }
+    const cue = restCue(end, now, stage.current);
+    stage.current = restStage(end, now);
+    if (cue) restBeep(cue);
+  }, [end, now]);
   useEffect(() => {
     if (!end) return;
     const tick = () => setNow(Date.now());
@@ -4531,7 +4599,7 @@ function SessionView({ source, close }: { source: Entry; close: () => void }) {
                   <span className="exercise-text">
                     <strong>{m?.name ?? x.originalName ?? "ไม่ทราบเครื่อง"}</strong>
                     {done.length ? done.map((set) => (
-                      <small className="ok" key={set.id}>{formatSet(set, x.loadMode)}{set.warmup && " (วอร์ม)"}</small>
+                      <small className="ok" key={set.id}>{formatSet(set, x.loadMode)}</small>
                     )) : <small>ยังไม่มีเซตที่ยืนยัน</small>}
                     {x.setup && <small className="muted">{x.setup}</small>}
                     {x.note && <small className="muted">{x.note}</small>}
@@ -4789,18 +4857,6 @@ function SessionEditorForm({
     const joined = v.exercises[i + 1].superset ?? Math.max(0, ...v.exercises.map((other) => other.superset ?? 0)) + 1;
     return { ...v, exercises: v.exercises.map((other, n) => n === i || n === i + 1 ? { ...other, superset: joined } : other) };
   });
-  const addWarmups = (i: number) => {
-    const exercise = s.exercises[i];
-    const first = exercise.sets.find((set) => !set.warmup && set.load !== null);
-    const load = first && totalLoad(first, exercise.loadMode);
-    const steps = load ? warmupSets(load, exercise.loadMode === "per-side" ? 5 : 2.5) : [];
-    if (!steps.length) return notify("กรอกน้ำหนักเซตจริงก่อน แล้วแอปจะคำนวณเซตวอร์มให้");
-    const mode: SetLog["enteredAs"] = exercise.loadMode === "per-side" ? "perSide" : "total";
-    update(i, { ...exercise, sets: [
-      ...steps.map((step): SetLog => ({ id: uid(), load: step.load, reps: step.reps, enteredAs: mode, warmup: true, done: false })),
-      ...exercise.sets.filter((set) => !set.warmup || set.done),
-    ] });
-  };
   const supersetLetter = (group: number) => {
     const groups = [...new Set(s.exercises.flatMap((other) => other.superset ?? []))];
     return String.fromCharCode(65 + groups.indexOf(group) % 26);
@@ -5026,9 +5082,6 @@ function SessionEditorForm({
                             {x.superset !== undefined ? "ออกจากซูเปอร์เซต" : "ซูเปอร์เซตกับท่าถัดไป"}
                           </button>
                         )}
-                        {inline && (x.loadMode === "total" || x.loadMode === "per-side") && (
-                          <button type="button" onClick={() => addWarmups(i)}>เติมเซตวอร์ม</button>
-                        )}
                         {inline && (
                           <label>พักท่านี้
                             <select value={x.restSeconds ?? ""} onChange={(e) =>
@@ -5162,6 +5215,42 @@ function SessionEditorForm({
     </Modal>
   );
 }
+/** Text that is read far more often than changed: shown as text, editable after ✏️ แก้. */
+function ReadEdit({ label, value, empty, placeholder, multiline, save }: {
+  label: string; value: string; empty: string; placeholder?: string; multiline?: boolean;
+  save?: (value: string) => void | Promise<unknown>;
+}) {
+  const { run } = useData();
+  const [draft, setDraft] = useState<string | null>(null);
+  return (
+    <div className="read-edit">
+      <div className="read-edit-head">
+        <span className="eyebrow">{label}</span>
+        {save && draft === null && (
+          <button type="button" className="text-button" aria-label={`แก้${label}`} onClick={() => setDraft(value)}>
+            <Pencil size={14} /> แก้
+          </button>
+        )}
+      </div>
+      {draft === null ? (
+        <p className={value.trim() ? "preserve" : "muted"}>{value.trim() || empty}</p>
+      ) : (
+        <div className="form">
+          {multiline
+            ? <textarea aria-label={label} rows={4} value={draft} placeholder={placeholder} onChange={(e) => setDraft(e.target.value)} />
+            : <input aria-label={label} value={draft} placeholder={placeholder} onChange={(e) => setDraft(e.target.value)} />}
+          <div className="upload-row">
+            <button type="button" className="primary" onClick={() => void run(async () => {
+              await save!(draft.trim());
+              setDraft(null);
+            }, `บันทึก${label}แล้ว`)}>บันทึก</button>
+            <button type="button" className="secondary" onClick={() => setDraft(null)}>ยกเลิก</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 function ExerciseFocus({
   x,
   index,
@@ -5247,30 +5336,6 @@ function ExerciseFocus({
                 <strong>{formatSet(a, last.exercise!.loadMode)}</strong>
               </p>
             ))}
-          {last?.exercise?.setup && (
-            <p className="muted">ตั้งเครื่อง: {last.exercise.setup}</p>
-          )}
-          {last && (
-            <button
-              className="text-button"
-              onClick={() =>
-                update({
-                  ...x,
-                  sets: last
-                    .exercise!.sets.filter((a) => a.done)
-                    .map((a) => ({
-                      ...a,
-                      id: uid(),
-                      done: false,
-                      warmup: false,
-                    })),
-                })
-              }
-            >
-              <Copy size={14} />
-              ใช้ค่าครั้งก่อนเป็นค่าตั้งต้น
-            </button>
-          )}
         </div>
         <div className="previous best">
           <span className="eyebrow">สถิติสูงสุด</span>
@@ -5355,20 +5420,20 @@ function ExerciseFocus({
           </button>
         )}
       </div>
-      <Field label="การตั้งเครื่องครั้งนี้">
-        <input
-          value={x.setup}
-          placeholder="เช่น เบาะระดับ 6"
-          onChange={(e) => update({ ...x, setup: e.target.value })}
-        />
-      </Field>
-      {m?.cues && (
-        <details className="how-to" open>
-          <summary>วิธีเล่น</summary>
-          <p className="preserve">{m.cues}</p>
-        </details>
-      )}
-      {m && catalogIdOf(m) && <HowTo catalogId={catalogIdOf(m)!} images={!machinePhotoIds(entries, x.machineId, m).main && !exerciseGuide(m.name)} open={!m.cues} />}
+      <ReadEdit label="การตั้งเครื่อง" value={x.setup || m?.setup || ""} empty="ยังไม่ได้จดการตั้งเครื่อง"
+        placeholder="เช่น เบาะระดับ 6"
+        save={async (setup) => {
+          update({ ...x, setup });
+          // The setting belongs to the machine, not only to today; a note for today goes in "โน้ตท่านี้".
+          if (m) await save("machine", { ...m, setup }, x.machineId);
+        }} />
+      <div className="how-to merged">
+        <ReadEdit label="วิธีเล่น" value={m?.cues ?? ""} empty="ยังไม่ได้เขียนวิธีเล่นเอง" multiline
+          placeholder="จุดที่ต้องระวัง / สิ่งที่โค้ชแนะนำ"
+          save={m ? (cues) => save("machine", { ...m, cues }, x.machineId) : undefined} />
+        {m && catalogIdOf(m) && <CatalogSteps catalogId={catalogIdOf(m)!}
+          images={!machinePhotoIds(entries, x.machineId, m).main && !exerciseGuide(m.name)} />}
+      </div>
       <Field label="โน้ตท่านี้">
         <input
           value={x.note}
