@@ -2744,6 +2744,8 @@ function startRest(sessionId: string, seconds: number) {
       void restSound.resume();
     }
   } catch { /* The visible timer still works. */ }
+  // Stored first, so a timer that is re-drawn at this moment still picks it up.
+  writeRestPreference(`rest:${sessionId}`, String(Date.now() + seconds * 1000));
   window.dispatchEvent(new CustomEvent("lilly-rest", { detail: { sessionId, seconds } }));
 }
 function restBeep(cue: RestCue) {

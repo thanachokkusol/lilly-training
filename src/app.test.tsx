@@ -702,6 +702,9 @@ it("logs every exercise on one screen with last time as the hint, rests by itsel
     targets: { press: { sets: 2, reps: 12, rest: 45 } } }, "routine-test");
   location.hash = "#today";
   render(<App />);
+  // The one-time how-to merge runs in the background on first load; let it finish first.
+  await waitFor(async () => expect((await allEntries()).filter((e) => e.kind === "machine" && !e.deleted)
+    .every((e) => e.data.howToMerged)).toBe(true), { timeout: 8000 });
   fireEvent.click(await screen.findByRole("button", { name: /Push Pull.*WE · 2 ท่า/ }));
   fireEvent.click(await screen.findByRole("button", { name: "เริ่มบันทึก 2 ท่า" }));
   await screen.findByText(/เสร็จ 0\/2 ท่า/);
