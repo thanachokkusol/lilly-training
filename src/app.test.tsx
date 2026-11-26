@@ -415,6 +415,16 @@ it("shows every gym's photos of an exercise in one row, labelled by gym, each pi
   fireEvent.click(detail.getByRole("button", { name: "รูปถัดไป" }));
   expect(detail.getByText(`2 / 2 · ${first === "WE Fitness" ? "M Fitness" : "WE Fitness"}`)).toBeTruthy();
 });
+it("shows one setup for an exercise at every gym, keeps differing old notes tagged by gym, and saves to all", async () => {
+  const press = { name: "Pec Fly", thai: "", group: "อก", cues: "", loadMode: "total" };
+  await save("machine", { ...press, gym: "WE Fitness", setup: "เบาะ 4" }, "fly-we");
+  await save("machine", { ...press, gym: "M Fitness", setup: "เบาะ 6" }, "fly-m");
+  location.hash = "machines";
+  render(<App />);
+  fireEvent.click((await screen.findAllByRole("button", { name: /Pec Fly/ }))[0]);
+  const detail = await topDialog();
+  expect(detail.getByText(/\[WE\] เบาะ 4\s+\[M\] เบาะ 6/)).toBeTruthy();
+});
 it("removes an unused gym from every list but never one with history", async () => {
   const machine = { name: "Old Press", thai: "", group: "อก", setup: "", cues: "", loadMode: "total" };
   await save("machine", { ...machine, gym: "อื่น ๆ", archived: true }, "old-other");

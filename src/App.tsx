@@ -1650,6 +1650,23 @@ function variantLabel(entries: Entry[], variant: Entry, all: Entry[]) {
   return gymName(entries, variant.data.gym) + (sameGym && label && label.toLowerCase() !== variant.data.name.toLowerCase() ? ` · ${label}` : "");
 }
 
+/**
+ * Setup and how-to belong to the exercise, not to one gym's machine. Different texts from older
+ * records are kept, each led by its gym tag, until someone saves one shared text.
+ */
+function sharedNote(entries: Entry[], machine: Entry, field: "setup" | "cues") {
+  const parts = exerciseVariants(entries, machine)
+    .map((v) => ({ gym: gymsFor(entries).find((g) => g.id === v.data.gym)?.shortCode || gymName(entries, v.data.gym), text: String(v.data[field] ?? "").trim() }))
+    .filter((p) => p.text);
+  const texts = [...new Set(parts.map((p) => p.text))];
+  if (texts.length <= 1) return texts[0] ?? "";
+  return texts.map((text) => `[${parts.filter((p) => p.text === text).map((p) => p.gym).join(", ")}] ${text}`).join("\n");
+}
+async function saveSharedNote(entries: Entry[], machine: Entry, field: "setup" | "cues", text: string) {
+  for (const v of exerciseVariants(entries, machine))
+    if (String(v.data[field] ?? "") !== text) await save("machine", { ...v.data, [field]: text }, v.id);
+}
+
 type GalleryItem = { key: string; photoId?: string; src?: string; label: string; machineId: string };
 /**
  * Every picture of the exercise at every gym: this machine's own photos first, then the illustration,
@@ -2068,11 +2085,11 @@ function MachineDetail({ id, close, selectMachine }: {
         <MachineInsights id={id} machine={m} entries={entries} />
         <div>
           <h4>{isStretch(id) ? "กี่วินาที กี่ครั้ง" : "การตั้งเครื่อง"}</h4>
-          <p className="preserve">{isStretch(id) ? planText(id) : m.setup || "ยังไม่มีบันทึก"}</p>
+          <p className="preserve">{isStretch(id) ? planText(id) : sharedNote(entries, e, "setup") || "ยังไม่มีบันทึก"}</p>
         </div>
         <div>
           <h4>วิธีเล่น</h4>
-          {(m.cues || !catalogIdOf(m)) && <p className="preserve">{m.cues || "ยังไม่มีบันทึก"}</p>}
+          {(sharedNote(entries, e, "cues") || !catalogIdOf(m)) && <p className="preserve">{sharedNote(entries, e, "cues") || "ยังไม่มีบันทึก"}</p>}
           {exerciseDemoLink(m.name) && (
             <a className="text-button" href={exerciseDemoLink(m.name)} target="_blank" rel="noreferrer">ดูตัวอย่างท่า</a>
           )}
@@ -5413,8 +5430,8 @@ function ExerciseFocus({
   const [inputMode, setInputMode] = useState<"total" | "perSide">(
     x.loadMode === "per-side" ? "perSide" : "total",
   );
-  const m = entries.find((e) => e.id === x.machineId)?.data as
-    Machine | undefined;
+  const own = entries.find((e) => e.id === x.machineId && e.kind === "machine");
+  const m = own?.data as Machine | undefined;
   const last = latestExercise(entries, x.machineId, date || today(), sessionId),
     best = bestSet(
       entries.filter((e) => e.id !== sessionId),
@@ -5553,17 +5570,17 @@ function ExerciseFocus({
           </button>
         )}
       </div>
-      <ReadEdit label="การตั้งเครื่อง" value={x.setup || m?.setup || ""} empty="ยังไม่ได้จดการตั้งเครื่อง"
+      <ReadEdit label="การตั้งเครื่อง (ใช้ร่วมทุกยิม)" value={own ? sharedNote(entries, own, "setup") : x.setup} empty="ยังไม่ได้จดการตั้งเครื่อง"
         placeholder="เช่น เบาะระดับ 6"
         save={async (setup) => {
           update({ ...x, setup });
-          // The setting belongs to the machine, not only to today; a note for today goes in "โน้ตท่านี้".
-          if (m) await save("machine", { ...m, setup }, x.machineId);
+          // The setting belongs to the exercise at every gym; a note for today goes in "โน้ตท่านี้".
+          if (own) await saveSharedNote(entries, own, "setup", setup);
         }} />
       <div className="how-to merged">
-        <ReadEdit label="วิธีเล่น" value={m?.cues ?? ""} empty="ยังไม่ได้เขียนวิธีเล่นเอง" multiline
+        <ReadEdit label="วิธีเล่น (ใช้ร่วมทุกยิม)" value={own ? sharedNote(entries, own, "cues") : ""} empty="ยังไม่ได้เขียนวิธีเล่นเอง" multiline
           placeholder="จุดที่ต้องระวัง / สิ่งที่โค้ชแนะนำ"
-          save={m ? (cues) => save("machine", { ...m, cues }, x.machineId) : undefined} />
+          save={own ? (cues) => saveSharedNote(entries, own, "cues", cues) : undefined} />
         {m && catalogIdOf(m) && <CatalogSteps catalogId={catalogIdOf(m)!}
           images={!machinePhotoIds(entries, x.machineId, m).main && !exerciseGuide(m.name)} />}
       </div>
