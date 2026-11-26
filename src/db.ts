@@ -233,6 +233,9 @@ export async function save(
   assertWritable();
   validateEntry({ id, kind, data });
   const old = (await (await db).get("entries", id)) as Entry | undefined;
+  // Relinking a photo keeps the fingerprint that recognises it when chosen again.
+  if (kind === "photo" && old?.data?.sourceHash && data.sourceHash === undefined)
+    data = { ...data, sourceHash: old.data.sourceHash };
   const e: Entry = {
     id,
     kind,
@@ -274,10 +277,19 @@ export async function clearPhotoBlob(id: string) {
 /** 720 pixels on the short side is enough to read a screen or recognise a machine, and keeps storage in the free plan. */
 export const photoScale = (width: number, height: number) =>
   Math.min(1, 720 / Math.min(width, height), 3000 / Math.max(width, height));
+/** Fingerprint of the file as chosen, so the same picture added twice can be recognised. */
+export async function fileHash(file: Blob) {
+  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest)).map((n) => n.toString(16).padStart(2, "0")).join("");
+}
 export async function addPhoto(file: Blob, label: string) {
   assertWritable();
   if (file.size > 30 * 1024 * 1024) throw Error("รูปต้องไม่เกิน 30 MB");
   if (!file.type.startsWith("image/")) throw Error("เลือกไฟล์รูปภาพ");
+  // A browser that cannot fingerprint the file still adds it, just without the duplicate check.
+  const sourceHash = await fileHash(file).catch(() => undefined);
+  const same = sourceHash && (await allEntries()).find((e) => e.kind === "photo" && !e.deleted && e.data.sourceHash === sourceHash);
+  if (same) throw Error("มีรูปนี้แล้ว ไม่ได้เพิ่มซ้ำ");
   const bitmap = await createImageBitmap(file);
   const scale = photoScale(bitmap.width, bitmap.height);
   const c = document.createElement("canvas");
@@ -294,7 +306,7 @@ export async function addPhoto(file: Blob, label: string) {
   );
   const id: string = crypto.randomUUID();
   await storePhoto(id, blob);
-  await save("photo", { label, mime: "image/jpeg" }, id);
+  await save("photo", { label, mime: "image/jpeg", ...(sourceHash && { sourceHash }) }, id);
   return id;
 }
 export async function exportBackup() {

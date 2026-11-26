@@ -145,3 +145,13 @@ it("stores new photos no larger than 720 pixels on the short side and never enla
   expect(size(1080, 9000)).toEqual([360, 3000]);
   expect(size(640, 480)).toEqual([640, 480]);
 });
+
+it("refuses the same picture twice and keeps its fingerprint when the photo is relinked", async () => {
+  const { addPhoto, save: saveEntry, getEntry, fileHash } = await import("./db");
+  const file = new File([new Uint8Array([1, 2, 3])], "a.jpg", { type: "image/jpeg" });
+  const hash = await fileHash(file);
+  await saveEntry("photo", { label: "x", mime: "image/jpeg", sourceHash: hash }, "dup-photo");
+  await saveEntry("photo", { label: "x", mime: "image/jpeg", machineId: "m" }, "dup-photo");
+  expect((await getEntry("dup-photo"))?.data.sourceHash).toBe(hash);
+  await expect(addPhoto(file, "again")).rejects.toThrow("มีรูปนี้แล้ว");
+});
